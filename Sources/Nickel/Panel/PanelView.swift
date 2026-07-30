@@ -105,6 +105,7 @@ struct PanelView: View {
                     .background(Circle().fill(.quaternary))
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
         }
     }

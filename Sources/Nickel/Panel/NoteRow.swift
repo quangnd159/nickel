@@ -54,16 +54,13 @@ struct NoteRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.accentColor, lineWidth: 2)
+                .strokeBorder(Color.accentColor, lineWidth: 2)
                 .opacity(isSelected ? 1 : 0)
         )
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture(count: 2)
-                .onEnded(beginEditing)
-                .exclusively(before: TapGesture(count: 1).onEnded(handleSingleClick))
-        )
+        .simultaneousGesture(TapGesture(count: 1).onEnded(handleSingleClick))
+        .simultaneousGesture(TapGesture(count: 2).onEnded(handleDoubleClick))
         .contextMenu { contextMenuContent }
     }
 
@@ -73,6 +70,13 @@ struct NoteRow: View {
         guard !isEditing else { return }
         let flags = NSEvent.modifierFlags
         selection.handleClick(on: note.id, shift: flags.contains(.shift), command: flags.contains(.command))
+    }
+
+    private func handleDoubleClick() {
+        guard !isEditing else { return }
+        let flags = NSEvent.modifierFlags
+        guard !flags.contains(.command), !flags.contains(.shift) else { return }
+        beginEditing()
     }
 
     private func beginEditing() {
