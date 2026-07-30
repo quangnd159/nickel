@@ -14,6 +14,7 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp ".build/release/Nickel" "$APP_BUNDLE/Contents/MacOS/Nickel"
 cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
+cp "Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 
 IDENTITY="-"
 if security find-identity -p codesigning -v 2>/dev/null | grep -q "Nickel Dev Signing"; then
