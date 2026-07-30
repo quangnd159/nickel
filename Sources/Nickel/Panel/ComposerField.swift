@@ -10,7 +10,9 @@ extension Notification.Name {
 }
 
 /// A borderless, multiline (up to 5 lines) `NSTextField` used for the
-/// panel's composer ("Add a note or a prompt").
+/// panel's composer ("Add a note or a prompt"), built on the shared
+/// `GrowingTextField` (see `GrowingTextField.swift`) — also used by
+/// `InlineTextEditor` for note editing, with an unbounded line count there.
 ///
 /// Backed by `NSViewRepresentable` (like `SearchField` and
 /// `InlineTextEditor`) rather than SwiftUI's `TextField(axis: .vertical)`
@@ -61,30 +63,6 @@ struct ComposerField: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, onCommit: onCommit)
-    }
-
-    /// An `NSTextField` whose intrinsic height grows with wrapped content
-    /// (up to `maximumNumberOfLines`), tracking the width AppKit lays it out
-    /// at via `layout()` rather than a fixed `preferredMaxLayoutWidth`.
-    final class GrowingTextField: NSTextField {
-        override func layout() {
-            super.layout()
-            let width = bounds.width
-            if width > 0, preferredMaxLayoutWidth != width {
-                preferredMaxLayoutWidth = width
-                invalidateIntrinsicContentSize()
-            }
-        }
-
-        override var intrinsicContentSize: NSSize {
-            guard let cell, preferredMaxLayoutWidth > 0 else { return super.intrinsicContentSize }
-            let size = cell.cellSize(forBounds: NSRect(
-                x: 0, y: 0,
-                width: preferredMaxLayoutWidth,
-                height: .greatestFiniteMagnitude
-            ))
-            return NSSize(width: NSView.noIntrinsicMetric, height: size.height)
-        }
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {

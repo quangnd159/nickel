@@ -1,9 +1,18 @@
 import SwiftUI
 import AppKit
 
-/// A borderless, transparent multiline `NSTextView` used for inline note
-/// editing. Enter commits, Esc cancels, and losing first responder for any
-/// other reason (e.g. clicking elsewhere in the panel) also commits.
+/// A borderless, transparent, unbounded-height `NSTextField` used for inline
+/// note editing, in place of the display `Text`. Enter commits, Shift+Enter
+/// inserts a newline, Esc cancels, and losing first responder for any other
+/// reason (e.g. clicking elsewhere in the panel) also commits.
+///
+/// Built on the same `GrowingTextField` (see `GrowingTextField.swift`) as
+/// `ComposerField`, so the card grows and shrinks live as the user types —
+/// with `maximumNumberOfLines = 0` (unbounded) rather than the composer's
+/// 5-line cap, since an editing note shouldn't clamp/truncate the way its
+/// `lineLimit(3)` display text does. `lineSpacing` is set to match the
+/// display `Text`'s `.lineSpacing(2)` so entering/leaving edit mode doesn't
+/// visibly reflow the card.
 ///
 /// Backed by `NSViewRepresentable` rather than SwiftUI's `TextField(axis:
 /// .vertical)` bound to `@State`, since `@State` isn't available in this
@@ -14,31 +23,30 @@ struct InlineTextEditor: NSViewRepresentable {
     var onCommit: () -> Void
     var onCancel: () -> Void
 
-    func makeNSView(context: Context) -> NSTextView {
-        let textView = NSTextView()
-        textView.delegate = context.coordinator
-        textView.font = .systemFont(ofSize: 13)
-        textView.string = text
-        textView.isRichText = false
-        textView.isAutomaticQuoteSubstitutionEnabled = false
-        textView.isAutomaticDashSubstitutionEnabled = false
-        textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.drawsBackground = false
-        textView.textContainerInset = .zero
-        textView.textContainer?.widthTracksTextView = true
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
+    func makeNSView(context: Context) -> GrowingTextField {
+        let field = GrowingTextField()
+        field.delegate = context.coordinator
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 14)
+        field.textColor = .labelColor
+        field.usesSingleLineMode = false
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
+        field.maximumNumberOfLines = 0
+        field.lineBreakMode = .byWordWrapping
+        field.lineSpacing = 2
+        field.stringValue = text
 
-        DispatchQueue.main.async {
-            textView.window?.makeFirstResponder(textView)
-            textView.selectAll(nil)
-        }
-        return textView
+        focusAtEnd(field)
+        return field
     }
 
-    func updateNSView(_ nsView: NSTextView, context: Context) {
-        if nsView.string != text {
-            nsView.string = text
+    func updateNSView(_ nsView: GrowingTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+            nsView.invalidateIntrinsicContentSize()
         }
     }
 
@@ -46,7 +54,31 @@ struct InlineTextEditor: NSViewRepresentable {
         Coordinator(text: $text, onCommit: onCommit, onCancel: onCancel)
     }
 
-    final class Coordinator: NSObject, NSTextViewDelegate {
+    /// Places the caret at the end of the existing text (no select-all: this
+    /// is an edit of existing content, not a fresh entry, so replacing
+    /// everything on an accidental keystroke would be dangerous for a long
+    /// note). Mirrors the one-tick retry in `HeaderRenameField`: the field
+    /// can be created mid-layout-pass (e.g. inside a ScrollView's
+    /// `LazyVStack`), in which case `makeFirstResponder` can silently no-op
+    /// on the first attempt.
+    private func focusAtEnd(_ field: NSTextField) {
+        func placeCaretAtEnd() {
+            field.window?.makeFirstResponder(field)
+            guard let editor = field.currentEditor() else { return }
+            let end = (editor.string as NSString).length
+            editor.selectedRange = NSRange(location: end, length: 0)
+        }
+        DispatchQueue.main.async {
+            placeCaretAtEnd()
+            if field.currentEditor() == nil {
+                DispatchQueue.main.async {
+                    placeCaretAtEnd()
+                }
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
         private let text: Binding<String>
         private let onCommit: () -> Void
         private let onCancel: () -> Void
@@ -58,29 +90,34 @@ struct InlineTextEditor: NSViewRepresentable {
             self.onCancel = onCancel
         }
 
-        func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
-            text.wrappedValue = textView.string
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+            field.invalidateIntrinsicContentSize()
         }
 
-        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                finish(commit: true)
-                textView.window?.makeFirstResponder(nil)
+                if NSEvent.modifierFlags.contains(.shift) {
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                } else {
+                    finish(commit: true)
+                    control.window?.makeFirstResponder(nil)
+                }
                 return true
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 finish(commit: false)
-                textView.window?.makeFirstResponder(nil)
+                control.window?.makeFirstResponder(nil)
                 return true
             }
             return false
         }
 
-        /// Fires when the text view resigns first responder for any reason,
+        /// Fires when the field resigns first responder for any reason,
         /// including our own explicit resignation above and clicking
         /// elsewhere in the panel; `didFinish` guards against double-commit.
-        func textDidEndEditing(_ notification: Notification) {
+        func controlTextDidEndEditing(_ notification: Notification) {
             finish(commit: true)
         }
 

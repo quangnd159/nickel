@@ -36,8 +36,7 @@ struct NoteRow: View {
                         onCommit: commitEdit,
                         onCancel: { selection.endEditing() }
                     )
-                    .font(.system(size: 14))
-                    .frame(minHeight: 18)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(renderedText)
                         .font(.system(size: 14))
