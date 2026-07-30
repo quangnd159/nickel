@@ -130,18 +130,38 @@ func drawIcon(size: CGFloat) {
     edgeHighlight.stroke()
     ctx.restoreGState()
 
+    // Given a polygon corner (with its neighboring vertices), returns the two
+    // points `radius` back from the corner along each incident edge, so a
+    // curve between them rounds the corner slightly.
+    func roundedCornerPoints(prev: CGPoint, corner: CGPoint, next: CGPoint, radius: CGFloat) -> (CGPoint, CGPoint) {
+        func trim(_ from: CGPoint, toward: CGPoint, by distance: CGFloat) -> CGPoint {
+            let dx = toward.x - from.x
+            let dy = toward.y - from.y
+            let length = (dx * dx + dy * dy).squareRoot()
+            guard length > 0 else { return from }
+            let clamped = min(distance, length / 2)
+            return CGPoint(x: from.x + dx / length * clamped, y: from.y + dy / length * clamped)
+        }
+        let start = trim(corner, toward: prev, by: radius)
+        let end = trim(corner, toward: next, by: radius)
+        return (start, end)
+    }
+
     // --- Glyph: two shift-key symbols --------------------------------------
-    // Classic shift-key silhouette: a wide upward arrowhead whose base steps
-    // inward at "shoulders" into a short rectangular stem, all as one filled
-    // polygon.
+    // Classic Mac keyboard ⇧ silhouette: the arrowhead DOMINATES (full glyph
+    // width, ~55-60% of height), sitting on a short, wide stem whose bottom
+    // is flat. The head's base extends well past the stem on both sides,
+    // forming the signature "shoulders". Corners are lightly rounded so it
+    // reads as machined metal, not clip-art.
     func shiftKeyPath(originX: CGFloat, originY: CGFloat, width: CGFloat, height: CGFloat) -> NSBezierPath {
-        let headHeight = height * 0.72 // arrowhead portion
-        let stemWidth = width * 0.34
+        let headHeight = height * 0.58 // arrowhead dominates the glyph
+        let stemHeight = height * 0.42
+        let stemWidth = width * 0.40 // ~40% of head (=full glyph) width
         let stemLeft = originX + (width - stemWidth) / 2
         let stemRight = stemLeft + stemWidth
-        let shoulderY = originY + headHeight
+        let shoulderY = originY + stemHeight
 
-        let apex = CGPoint(x: originX + width / 2, y: originY + height)
+        let apex = CGPoint(x: originX + width / 2, y: originY + stemHeight + headHeight)
         let rightBaseOuter = CGPoint(x: originX + width, y: shoulderY)
         let rightShoulder = CGPoint(x: stemRight, y: shoulderY)
         let rightStemBottom = CGPoint(x: stemRight, y: originY)
@@ -149,14 +169,21 @@ func drawIcon(size: CGFloat) {
         let leftShoulder = CGPoint(x: stemLeft, y: shoulderY)
         let leftBaseOuter = CGPoint(x: originX, y: shoulderY)
 
+        let points = [apex, rightBaseOuter, rightShoulder, rightStemBottom, leftStemBottom, leftShoulder, leftBaseOuter]
+        let radius: CGFloat = 10
+
         let path = NSBezierPath()
-        path.move(to: apex)
-        path.line(to: rightBaseOuter)
-        path.line(to: rightShoulder)
-        path.line(to: rightStemBottom)
-        path.line(to: leftStemBottom)
-        path.line(to: leftShoulder)
-        path.line(to: leftBaseOuter)
+        for (i, point) in points.enumerated() {
+            let prev = points[(i - 1 + points.count) % points.count]
+            let next = points[(i + 1) % points.count]
+            let (start, end) = roundedCornerPoints(prev: prev, corner: point, next: next, radius: radius)
+            if i == 0 {
+                path.move(to: start)
+            } else {
+                path.line(to: start)
+            }
+            path.curve(to: end, controlPoint1: point, controlPoint2: point)
+        }
         path.close()
         return path
     }
