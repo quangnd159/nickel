@@ -274,6 +274,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
             return true
         }
+        if modifiers == [.command], characters == "n" {
+            NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+            return true
+        }
         if modifiers == [.command, .shift] {
             if characters == "c" {
                 actions.copyAsList()

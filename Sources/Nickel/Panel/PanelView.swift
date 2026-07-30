@@ -291,11 +291,8 @@ struct PanelView: View {
                 .foregroundStyle(.quaternary)
                 .frame(height: 19)
 
-            TextField("Add a note or a prompt", text: $ui.composerText, axis: .vertical)
-                .textFieldStyle(.plain)
+            ComposerField(text: $ui.composerText, onCommit: commitComposer)
                 .font(.system(size: 14))
-                .lineLimit(1...5)
-                .onSubmit(commitComposer)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)

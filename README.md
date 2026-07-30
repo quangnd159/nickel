@@ -38,6 +38,7 @@ selection (unless noted otherwise).
 | Double-tap **Shift**                 | Capture the current selection (anywhere), or toggle the panel if nothing's selected |
 | **⌘C**                               | Copy selected note(s) as plain text                                |
 | **⇧⌘C**                              | Copy selected note(s) as a `- ` bulleted list                      |
+| **⌘N**                               | Focus the composer to jump straight into typing a note              |
 | **Space**                            | Toggle done / not-done on the selection                            |
 | **Return**                           | Edit the selected note (single selection only)                     |
 | **⇧⌘M**                              | Merge the selected notes into one                                  |
@@ -48,6 +49,9 @@ selection (unless noted otherwise).
 | **Esc** (search focused, empty)      | Leave the search field                                              |
 | **Esc** (editing a note)             | Cancel the edit, discarding changes                                 |
 | **Return** (editing a note)          | Commit the edit                                                     |
+| **Return** (composer focused)        | Add the note and keep focus in the composer for the next one        |
+| **⇧Return** (composer focused)       | Insert a line break in the note                                     |
+| **Esc** (composer focused)           | Leave the composer                                                  |
 
 ## Install & build
 

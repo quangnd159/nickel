@@ -1,0 +1,139 @@
+import SwiftUI
+import AppKit
+
+/// Posted by `FloatingPanel` when ⌘N is pressed, so `ComposerField` can focus
+/// its field editor even though the panel deliberately opens with no first
+/// responder (see `FloatingPanel.animateShow`). Mirrors `.nickelFocusSearch`
+/// in `SearchField.swift`.
+extension Notification.Name {
+    static let nickelFocusComposer = Notification.Name("NickelFocusComposer")
+}
+
+/// A borderless, multiline (up to 5 lines) `NSTextField` used for the
+/// panel's composer ("Add a note or a prompt").
+///
+/// Backed by `NSViewRepresentable` (like `SearchField` and
+/// `InlineTextEditor`) rather than SwiftUI's `TextField(axis: .vertical)`
+/// bound to `@State`, both because `@State`-family macros aren't available
+/// in this build (see `PanelUIState` in `PanelView.swift`) and because
+/// Return here needs context-sensitive behavior (commit-and-keep-focus vs.
+/// insert-a-line-break on Shift+Return) that requires intercepting
+/// `insertNewline` directly.
+struct ComposerField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String = "Add a note or a prompt"
+    /// Called when plain Return is pressed. The caller adds the note and
+    /// clears the text; focus is deliberately kept so the next note can be
+    /// typed immediately.
+    var onCommit: () -> Void
+
+    func makeNSView(context: Context) -> GrowingTextField {
+        let field = GrowingTextField()
+        field.delegate = context.coordinator
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 14)
+        field.usesSingleLineMode = false
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
+        field.maximumNumberOfLines = 5
+        field.lineBreakMode = .byWordWrapping
+        field.placeholderAttributedString = NSAttributedString(
+            string: placeholder,
+            attributes: [
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .font: NSFont.systemFont(ofSize: 14)
+            ]
+        )
+        field.stringValue = text
+        context.coordinator.field = field
+        return field
+    }
+
+    func updateNSView(_ nsView: GrowingTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+            nsView.invalidateIntrinsicContentSize()
+        }
+        context.coordinator.onCommit = onCommit
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onCommit: onCommit)
+    }
+
+    /// An `NSTextField` whose intrinsic height grows with wrapped content
+    /// (up to `maximumNumberOfLines`), tracking the width AppKit lays it out
+    /// at via `layout()` rather than a fixed `preferredMaxLayoutWidth`.
+    final class GrowingTextField: NSTextField {
+        override func layout() {
+            super.layout()
+            let width = bounds.width
+            if width > 0, preferredMaxLayoutWidth != width {
+                preferredMaxLayoutWidth = width
+                invalidateIntrinsicContentSize()
+            }
+        }
+
+        override var intrinsicContentSize: NSSize {
+            guard let cell, preferredMaxLayoutWidth > 0 else { return super.intrinsicContentSize }
+            let size = cell.cellSize(forBounds: NSRect(
+                x: 0, y: 0,
+                width: preferredMaxLayoutWidth,
+                height: .greatestFiniteMagnitude
+            ))
+            return NSSize(width: NSView.noIntrinsicMetric, height: size.height)
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        private let text: Binding<String>
+        var onCommit: () -> Void
+        weak var field: NSTextField?
+
+        init(text: Binding<String>, onCommit: @escaping () -> Void) {
+            self.text = text
+            self.onCommit = onCommit
+            super.init()
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(focusComposer),
+                name: .nickelFocusComposer,
+                object: nil
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func focusComposer() {
+            guard let field else { return }
+            field.window?.makeFirstResponder(field)
+            field.currentEditor()?.moveToEndOfDocument(nil)
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField else { return }
+            text.wrappedValue = field.stringValue
+            field.invalidateIntrinsicContentSize()
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                if NSEvent.modifierFlags.contains(.shift) {
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                } else {
+                    onCommit()
+                }
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                control.window?.makeFirstResponder(nil)
+                return true
+            }
+            return false
+        }
+    }
+}
