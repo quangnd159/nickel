@@ -1,4 +1,5 @@
 import SwiftUI
+import ServiceManagement
 
 struct VisualEffectBackground: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .hudWindow
@@ -69,8 +70,7 @@ struct PanelView: View {
                     .foregroundStyle(.secondary)
                     .font(.system(size: 12))
 
-                TextField("Search", text: $ui.searchText)
-                    .textFieldStyle(.plain)
+                SearchField(text: $ui.searchText, onEscape: handleSearchEscape)
                     .font(.system(size: 13))
             }
             .padding(.horizontal, 10)
@@ -84,6 +84,13 @@ struct PanelView: View {
                 Button("Copy All as List") {
                     actions.copyAllAsList()
                 }
+
+                Divider()
+
+                Toggle("Launch at Login", isOn: Binding(
+                    get: { LaunchAtLogin.isEnabled },
+                    set: { LaunchAtLogin.setEnabled($0) }
+                ))
 
                 Divider()
 
@@ -138,6 +145,7 @@ struct PanelView: View {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     ForEach(ungroupedNotes) { note in
                         NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                            .transition(rowTransition)
                     }
 
                     ForEach(store.listNames, id: \.self) { listName in
@@ -145,16 +153,30 @@ struct PanelView: View {
                         if !items.isEmpty {
                             sectionHeader(listName)
                                 .padding(.top, 12)
+                                .transition(rowTransition)
 
                             ForEach(items) { note in
                                 NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                    .transition(rowTransition)
                             }
                         }
                     }
                 }
+                .animation(rowSpring, value: flatVisibleIDs)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    /// Gentle spring used for note insert/delete/move and section
+    /// appearance, keyed off the flat visible order so any change to which
+    /// notes are shown (or in what order) animates.
+    private var rowSpring: Animation {
+        .spring(response: 0.3, dampingFraction: 0.8)
+    }
+
+    private var rowTransition: AnyTransition {
+        .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
     }
 
     private func sectionHeader(_ title: String) -> some View {
@@ -205,6 +227,18 @@ struct PanelView: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
         )
+    }
+
+    /// Esc in the search field: if it has text, clear it (and keep focus so
+    /// the user can keep typing a new query); if it's already empty, give up
+    /// focus so a subsequent Esc falls through to the panel's own Esc
+    /// handling (clear selection / hide panel).
+    private func handleSearchEscape() {
+        if !ui.searchText.isEmpty {
+            ui.searchText = ""
+        } else {
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
     }
 
     private func commitComposer() {

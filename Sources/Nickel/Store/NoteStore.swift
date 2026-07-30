@@ -22,6 +22,19 @@ final class NoteStore: ObservableObject {
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounceInterval: TimeInterval = 0.5
 
+    /// Hard cap on a single note's length. Guards against runaway captures
+    /// (e.g. selecting an entire huge document) bloating the notes file and
+    /// the UI; text past this length is truncated with a trailing ellipsis.
+    private static let maxNoteLength = 20_000
+
+    /// Consecutive captures of the *same* text within this window are
+    /// treated as accidental duplicates (e.g. a double-shift firing twice on
+    /// the same selection) and are not added again.
+    private static let duplicateCaptureWindow: TimeInterval = 2.0
+
+    private var lastCapturedText: String?
+    private var lastCapturedAt: Date?
+
     init(fileURL: URL? = nil) {
         self.fileURL = fileURL ?? Self.defaultFileURL()
         self.notes = Self.load(from: self.fileURL)
@@ -29,10 +42,26 @@ final class NoteStore: ObservableObject {
 
     // MARK: - Mutations
 
-    func add(text: String, sourceApp: String?) {
+    /// Adds a note. `isCapture` marks this as coming from the double-shift
+    /// capture flow (as opposed to the composer), which enables the
+    /// duplicate-capture debounce below; composer submissions always add.
+    func add(text: String, sourceApp: String?, isCapture: Bool = false) {
+        let trimmedText = Self.capped(text)
+
+        if isCapture {
+            let now = Date()
+            if let lastCapturedText, let lastCapturedAt,
+               lastCapturedText == trimmedText,
+               now.timeIntervalSince(lastCapturedAt) <= Self.duplicateCaptureWindow {
+                return
+            }
+            lastCapturedText = trimmedText
+            lastCapturedAt = now
+        }
+
         let note = Note(
             id: UUID(),
-            text: text,
+            text: trimmedText,
             listName: nil,
             isDone: false,
             createdAt: Date(),
@@ -40,6 +69,12 @@ final class NoteStore: ObservableObject {
         )
         notes.append(note)
         scheduleSave()
+    }
+
+    private static func capped(_ text: String) -> String {
+        guard text.count > maxNoteLength else { return text }
+        let truncated = text.prefix(maxNoteLength)
+        return truncated + "…"
     }
 
     func update(id: UUID, text: String) {
