@@ -1,5 +1,13 @@
 import AppKit
 
+/// Shared font/line-spacing metrics for note display and note editing, so
+/// `NoteLabel` and `InlineTextEditor` measure and wrap identically. See
+/// `NoteLabel.swift` for why the two need to match pixel-for-pixel.
+enum NoteTextMetrics {
+    static let fontSize: CGFloat = 14
+    static let lineSpacing: CGFloat = 2
+}
+
 /// An `NSTextField` whose intrinsic height grows with wrapped content (up to
 /// `maximumNumberOfLines`, or unbounded when that's `0`), tracking the width
 /// AppKit lays it out at via `layout()` rather than a fixed

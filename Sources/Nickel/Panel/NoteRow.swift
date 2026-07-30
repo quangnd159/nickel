@@ -38,12 +38,7 @@ struct NoteRow: View {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    Text(renderedText)
-                        .font(.system(size: 14))
-                        .lineSpacing(2)
-                        .foregroundStyle(.primary)
-                        .lineLimit(3)
-                        .truncationMode(.tail)
+                    NoteLabel(text: note.text)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .opacity(note.isDone ? 0.5 : 1)
                 }
@@ -155,12 +150,5 @@ struct NoteRow: View {
 
         Button("Delete") { actions.delete() }
             .keyboardShortcut(.delete, modifiers: [])
-    }
-
-    private var renderedText: AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace
-        )
-        return (try? AttributedString(markdown: note.text, options: options)) ?? AttributedString(note.text)
     }
 }

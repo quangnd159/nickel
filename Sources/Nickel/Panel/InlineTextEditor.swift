@@ -29,14 +29,14 @@ struct InlineTextEditor: NSViewRepresentable {
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
-        field.font = .systemFont(ofSize: 14)
+        field.font = .systemFont(ofSize: NoteTextMetrics.fontSize)
         field.textColor = .labelColor
         field.usesSingleLineMode = false
         field.cell?.wraps = true
         field.cell?.isScrollable = false
         field.maximumNumberOfLines = 0
         field.lineBreakMode = .byWordWrapping
-        field.lineSpacing = 2
+        field.lineSpacing = NoteTextMetrics.lineSpacing
         field.stringValue = text
 
         focusAtEnd(field)
