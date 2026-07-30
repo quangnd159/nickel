@@ -10,9 +10,16 @@ import AppKit
 /// `ComposerField`, so the card grows and shrinks live as the user types —
 /// with `maximumNumberOfLines = 0` (unbounded) rather than the composer's
 /// 5-line cap, since an editing note shouldn't clamp/truncate the way its
-/// `lineLimit(3)` display text does. `lineSpacing` is set to match the
-/// display `Text`'s `.lineSpacing(2)` so entering/leaving edit mode doesn't
-/// visibly reflow the card.
+/// `lineLimit(3)` display text does.
+///
+/// Line height is pinned to `NoteTextMetrics`'s fixed value (see that type's
+/// doc comment) so entering/leaving edit mode doesn't visibly reflow the
+/// card. `GrowingTextField.fixedParagraphStyle` covers intrinsic-size
+/// measurement and freshly-typed text, but the window's field editor doesn't
+/// reliably honor a paragraph style from typing attributes for text that's
+/// already present when editing begins — so `pinFixedLineHeight(in:)` also
+/// stamps the style directly onto the field editor's `textStorage` right
+/// after focusing.
 ///
 /// Backed by `NSViewRepresentable` rather than SwiftUI's `TextField(axis:
 /// .vertical)` bound to `@State`, since `@State` isn't available in this
@@ -36,7 +43,7 @@ struct InlineTextEditor: NSViewRepresentable {
         field.cell?.isScrollable = false
         field.maximumNumberOfLines = 0
         field.lineBreakMode = .byWordWrapping
-        field.lineSpacing = NoteTextMetrics.lineSpacing
+        field.fixedParagraphStyle = NoteTextMetrics.makeParagraphStyle()
         field.stringValue = text
 
         focusAtEnd(field)
@@ -64,7 +71,8 @@ struct InlineTextEditor: NSViewRepresentable {
     private func focusAtEnd(_ field: NSTextField) {
         func placeCaretAtEnd() {
             field.window?.makeFirstResponder(field)
-            guard let editor = field.currentEditor() else { return }
+            guard let editor = field.currentEditor() as? NSTextView else { return }
+            Self.pinFixedLineHeight(in: editor)
             let end = (editor.string as NSString).length
             editor.selectedRange = NSRange(location: end, length: 0)
         }
@@ -78,6 +86,28 @@ struct InlineTextEditor: NSViewRepresentable {
         }
     }
 
+    /// Forces the field editor to the same fixed line height as the display
+    /// label and freshly-typed text: `defaultParagraphStyle` and
+    /// `typingAttributes` for anything typed from here on, and the style plus
+    /// base font stamped directly onto `textStorage` for the text already in
+    /// the field when editing began (which typing attributes alone don't
+    /// reliably cover — see this file's doc comment).
+    fileprivate static func pinFixedLineHeight(in editor: NSTextView) {
+        let style = NoteTextMetrics.makeParagraphStyle()
+        let font = NSFont.systemFont(ofSize: NoteTextMetrics.fontSize)
+        editor.defaultParagraphStyle = style
+        editor.typingAttributes = [
+            .paragraphStyle: style,
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ]
+        if let textStorage = editor.textStorage {
+            let fullRange = NSRange(location: 0, length: textStorage.length)
+            textStorage.addAttribute(.paragraphStyle, value: style, range: fullRange)
+            textStorage.addAttribute(.font, value: font, range: fullRange)
+        }
+    }
+
     final class Coordinator: NSObject, NSTextFieldDelegate {
         private let text: Binding<String>
         private let onCommit: () -> Void
@@ -88,6 +118,15 @@ struct InlineTextEditor: NSViewRepresentable {
             self.text = text
             self.onCommit = onCommit
             self.onCancel = onCancel
+        }
+
+        /// Belt-and-braces alongside the `focusAtEnd` retry loop: whichever
+        /// path actually lands the field editor, this re-pins the fixed line
+        /// height right as editing begins.
+        func controlTextDidBeginEditing(_ notification: Notification) {
+            guard let field = notification.object as? NSTextField,
+                  let editor = field.currentEditor() as? NSTextView else { return }
+            InlineTextEditor.pinFixedLineHeight(in: editor)
         }
 
         func controlTextDidChange(_ notification: Notification) {

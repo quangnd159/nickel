@@ -43,13 +43,9 @@ struct NoteLabel: NSViewRepresentable {
         }
     }
 
-    /// Shared paragraph style, identical to the one `InlineTextEditor` (via
-    /// `GrowingTextField.lineSpacing`) carries into its typing attributes.
-    private static let paragraphStyle: NSParagraphStyle = {
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = NoteTextMetrics.lineSpacing
-        return style
-    }()
+    /// Shared paragraph style, identical to the one `InlineTextEditor` pins
+    /// on its field editor.
+    private static let paragraphStyle: NSParagraphStyle = NoteTextMetrics.makeParagraphStyle()
 
     private static let baseFont = NSFont.systemFont(ofSize: NoteTextMetrics.fontSize)
 

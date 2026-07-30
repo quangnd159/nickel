@@ -1,11 +1,29 @@
 import AppKit
 
-/// Shared font/line-spacing metrics for note display and note editing, so
+/// Shared font/line-height metrics for note display and note editing, so
 /// `NoteLabel` and `InlineTextEditor` measure and wrap identically. See
 /// `NoteLabel.swift` for why the two need to match pixel-for-pixel.
+///
+/// Line height is pinned to an absolute value (`minimumLineHeight ==
+/// maximumLineHeight == lineHeight`, `lineSpacing = 0`) rather than expressed
+/// as `lineSpacing` on top of the font's natural line height: the window's
+/// field editor (the `NSTextView` AppKit substitutes in while an `NSTextField`
+/// is being edited) doesn't reliably honor `paragraphStyle.lineSpacing` from
+/// typing attributes for text that's already in the field when editing
+/// begins, which let edit-mode line height drift slightly from display mode.
+/// An absolute min/max line height is enforced by the layout manager
+/// regardless of that path, so it stays identical everywhere.
 enum NoteTextMetrics {
     static let fontSize: CGFloat = 14
-    static let lineSpacing: CGFloat = 2
+    static let lineHeight: CGFloat = 20
+
+    static func makeParagraphStyle() -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.minimumLineHeight = lineHeight
+        style.maximumLineHeight = lineHeight
+        style.lineSpacing = 0
+        return style
+    }
 }
 
 /// An `NSTextField` whose intrinsic height grows with wrapped content (up to
@@ -19,12 +37,12 @@ enum NoteTextMetrics {
 /// user types, which SwiftUI's own multiline `TextField` can't do under this
 /// project's `@State`-free build constraint (see `PanelView.PanelUIState`).
 class GrowingTextField: NSTextField {
-    /// Extra spacing between wrapped lines, matching the display `Text`'s
-    /// `.lineSpacing(_:)` so entering/leaving edit mode doesn't reflow height.
-    /// Applied via paragraph style so both intrinsic-size measurement and the
-    /// field editor's typing metrics account for it. Zero (the default) is a
-    /// no-op, preserving prior behavior for fields that don't set it.
-    var lineSpacing: CGFloat = 0 {
+    /// A fixed paragraph style (see `NoteTextMetrics.makeParagraphStyle()`)
+    /// matching the display label's, so entering/leaving edit mode doesn't
+    /// reflow height. Applied via `attributedStringValue` so intrinsic-size
+    /// measurement accounts for it; `nil` (the default) is a no-op,
+    /// preserving prior behavior for fields that don't set it.
+    var fixedParagraphStyle: NSParagraphStyle? {
         didSet { applyParagraphStyle() }
     }
 
@@ -51,23 +69,23 @@ class GrowingTextField: NSTextField {
         return NSSize(width: NSView.noIntrinsicMetric, height: size.height)
     }
 
-    /// Carries `lineSpacing` into the field editor's typing attributes so
-    /// text the user types (not just what's set via `stringValue`) wraps
-    /// with the same metrics as the display `Text`.
+    /// Carries `fixedParagraphStyle` into the field editor's typing
+    /// attributes so text the user types (not just what's set via
+    /// `stringValue`) wraps with the same metrics as the display label. This
+    /// alone isn't sufficient for text that's already in the field when
+    /// editing begins (see `InlineTextEditor`, which pins the field editor's
+    /// `textStorage` directly for that case); it's kept here mainly so
+    /// intrinsic-size measurement and freshly-typed text agree.
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
-        if became, lineSpacing > 0, let editor = currentEditor() as? NSTextView {
-            let style = NSMutableParagraphStyle()
-            style.lineSpacing = lineSpacing
+        if became, let style = fixedParagraphStyle, let editor = currentEditor() as? NSTextView {
             editor.typingAttributes[.paragraphStyle] = style
         }
         return became
     }
 
     private func applyParagraphStyle() {
-        guard lineSpacing > 0 else { return }
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = lineSpacing
+        guard let style = fixedParagraphStyle else { return }
         let attributed = NSAttributedString(string: stringValue, attributes: [
             .font: font ?? NSFont.systemFont(ofSize: NSFont.systemFontSize),
             .paragraphStyle: style
