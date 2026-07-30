@@ -17,24 +17,12 @@ struct VisualEffectBackground: NSViewRepresentable {
     }
 }
 
-/// Holds the panel's ephemeral UI state (search text, composer draft).
-///
-/// This is a plain `ObservableObject` wired up via `@StateObject` rather than
-/// `@State`, because the `@State` property-wrapper macro requires a compiler
-/// plugin (`SwiftUIMacros`) that ships only with Xcode.app. This project is
-/// built with the Xcode Command Line Tools only (`swift build`, no Xcode), so
-/// that plugin isn't available and `@State` fails to compile. `@StateObject`
-/// has no such macro dependency and works fine here.
-final class PanelUIState: ObservableObject {
-    @Published var searchText = ""
-    @Published var composerText = ""
-}
-
 struct PanelView: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
-    @StateObject private var ui = PanelUIState()
+    @State private var searchText = ""
+    @State private var composerText = ""
 
     var body: some View {
         ZStack {
@@ -55,7 +43,7 @@ struct PanelView: View {
                 topBar
                     .padding(.bottom, 12)
 
-                if store.notes.isEmpty && ui.searchText.isEmpty {
+                if store.notes.isEmpty && searchText.isEmpty {
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -81,7 +69,7 @@ struct PanelView: View {
                     .foregroundStyle(.secondary)
                     .font(.system(size: 12))
 
-                SearchField(text: $ui.searchText, onEscape: handleSearchEscape)
+                SearchField(text: $searchText, onEscape: handleSearchEscape)
                     .font(.system(size: 13))
             }
             .padding(.horizontal, 12)
@@ -124,8 +112,8 @@ struct PanelView: View {
     // MARK: - Note list
 
     private var filteredNotes: [Note] {
-        guard !ui.searchText.isEmpty else { return store.notes }
-        return store.notes.filter { $0.text.localizedCaseInsensitiveContains(ui.searchText) }
+        guard !searchText.isEmpty else { return store.notes }
+        return store.notes.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
     }
 
     private var ungroupedNotes: [Note] {
@@ -305,7 +293,7 @@ struct PanelView: View {
                 .foregroundStyle(.quaternary)
                 .frame(height: 19)
 
-            ComposerField(text: $ui.composerText, onCommit: commitComposer)
+            ComposerField(text: $composerText, onCommit: commitComposer)
                 .font(.system(size: 14))
         }
         .padding(.horizontal, 14)
@@ -321,17 +309,17 @@ struct PanelView: View {
     /// focus so a subsequent Esc falls through to the panel's own Esc
     /// handling (clear selection / hide panel).
     private func handleSearchEscape() {
-        if !ui.searchText.isEmpty {
-            ui.searchText = ""
+        if !searchText.isEmpty {
+            searchText = ""
         } else {
             NSApp.keyWindow?.makeFirstResponder(nil)
         }
     }
 
     private func commitComposer() {
-        let text = ui.composerText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         store.add(text: text, sourceApp: nil)
-        ui.composerText = ""
+        composerText = ""
     }
 }

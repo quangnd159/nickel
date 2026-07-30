@@ -7,18 +7,7 @@ import AppKit
 ///
 /// Used by `ComposerField` (bordered-free, 5-line cap), which needs a
 /// multiline field editor whose card/container grows and shrinks live as the
-/// user types — something SwiftUI's own multiline `TextField` can't do under
-/// this project's `@State`-free build constraint (see `PanelUIState` in
-/// `PanelView.swift`).
-///
-/// Note editing and display used to share this class too (`InlineTextEditor`
-/// and `NoteLabel`, both removed), pinning an absolute paragraph-style line
-/// height (`fixedParagraphStyle`) so the two independent layout passes agreed
-/// pixel-for-pixel. Now that Xcode's SwiftUI macros are available, both
-/// display and editing run through SwiftUI's own text engine instead (see
-/// `NoteRow`), which measures both consistently on its own — so that pinning
-/// machinery is gone from here; only the composer's live-growth mechanism
-/// remains.
+/// user types.
 class GrowingTextField: NSTextField {
     override func layout() {
         super.layout()

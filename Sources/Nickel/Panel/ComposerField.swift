@@ -11,16 +11,14 @@ extension Notification.Name {
 
 /// A borderless, multiline (up to 5 lines) `NSTextField` used for the
 /// panel's composer ("Add a note or a prompt"), built on the shared
-/// `GrowingTextField` (see `GrowingTextField.swift`) — also used by
-/// `InlineTextEditor` for note editing, with an unbounded line count there.
+/// `GrowingTextField` (see `GrowingTextField.swift`).
 ///
-/// Backed by `NSViewRepresentable` (like `SearchField` and
-/// `InlineTextEditor`) rather than SwiftUI's `TextField(axis: .vertical)`
-/// bound to `@State`, both because `@State`-family macros aren't available
-/// in this build (see `PanelUIState` in `PanelView.swift`) and because
-/// Return here needs context-sensitive behavior (commit-and-keep-focus vs.
-/// insert-a-line-break on Shift+Return) that requires intercepting
-/// `insertNewline` directly.
+/// Backed by `NSViewRepresentable` rather than SwiftUI's
+/// `TextField(axis: .vertical)`: Return here needs context-sensitive
+/// behavior (commit-and-keep-focus on plain Return vs. insert-a-line-break
+/// on Shift+Return) that requires intercepting `insertNewline` directly, and
+/// the field needs to auto-grow to fit its content inside the composer's
+/// card.
 struct ComposerField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String = "Add a note or a prompt"

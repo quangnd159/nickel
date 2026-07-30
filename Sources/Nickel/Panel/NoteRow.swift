@@ -8,10 +8,7 @@ import AppKit
 ///
 /// Display and edit both run through SwiftUI's own text engine (`Text` and
 /// `TextField(axis: .vertical)`) at the same 14pt/`.lineSpacing(2)` metrics,
-/// so wrapping and height match by construction — no shared NSTextField
-/// subclass or paragraph-style pinning needed (see the removed `NoteLabel`
-/// and `InlineTextEditor`, which existed only to work around that mismatch
-/// when editing ran through the window's field editor).
+/// so wrapping and height match by construction.
 struct NoteRow: View {
     let note: Note
     let onToggleDone: () -> Void
@@ -203,10 +200,9 @@ struct NoteRow: View {
         return .handled
     }
 
-    /// Builds the display string from the same inline markdown parsing
-    /// `NoteLabel` used pre-migration (and this file used before commit
-    /// cee578a): `AttributedString(markdown:, options:
-    /// .inlineOnlyPreservingWhitespace)`, with a plain-text fallback for
+    /// Builds the display string via inline markdown parsing
+    /// (`AttributedString(markdown:, options:
+    /// .inlineOnlyPreservingWhitespace)`), with a plain-text fallback for
     /// unparseable input.
     private var renderedText: AttributedString {
         let options = AttributedString.MarkdownParsingOptions(

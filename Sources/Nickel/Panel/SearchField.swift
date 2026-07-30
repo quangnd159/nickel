@@ -10,12 +10,9 @@ extension Notification.Name {
 
 /// A borderless, single-line `NSTextField` used for the panel's search box.
 ///
-/// Backed by `NSViewRepresentable` (like `InlineTextEditor`) rather than
-/// SwiftUI's `TextField` bound to `@State`/`@FocusState`, both because
-/// `@State`-family macros aren't available in this build (see
-/// `PanelUIState` in `PanelView.swift`) and because Esc here needs
-/// context-sensitive behavior (clear text vs. give up focus) that requires
-/// intercepting `cancelOperation` directly.
+/// Backed by `NSViewRepresentable` rather than SwiftUI's `TextField`: Esc
+/// here needs context-sensitive behavior (clear text vs. give up focus) that
+/// requires intercepting `cancelOperation` directly.
 struct SearchField: NSViewRepresentable {
     @Binding var text: String
     var placeholder: String = "Search"

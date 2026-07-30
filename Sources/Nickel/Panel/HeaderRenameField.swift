@@ -5,13 +5,11 @@ import AppKit
 /// in place (Finder "New Folder" / rename pattern). Focused immediately with
 /// all text selected. Enter commits, Esc cancels (reverting to the original
 /// name), and losing first responder for any other reason (click elsewhere)
-/// also commits — matching `InlineTextEditor`'s behavior for note editing.
+/// also commits.
 ///
-/// Backed by `NSViewRepresentable` rather than SwiftUI's `TextField` bound to
-/// `@State`/`@FocusState`, for the same reason as `SearchField` and
-/// `InlineTextEditor`: the `@State` macro family isn't available under
-/// `swift build` without Xcode.app, and this needs precise control over the
-/// Enter/Esc key commands plus explicit select-all-on-focus.
+/// Backed by `NSViewRepresentable` rather than SwiftUI's `TextField`: this
+/// needs precise control over the Enter/Esc key commands plus explicit
+/// select-all-on-focus.
 struct HeaderRenameField: NSViewRepresentable {
     @Binding var text: String
     var onCommit: () -> Void

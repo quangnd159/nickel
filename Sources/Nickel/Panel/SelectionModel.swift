@@ -3,10 +3,6 @@ import Foundation
 /// Shared selection/editing state for the note list, plus the click and
 /// keyboard-navigation logic that operates over the panel's current flat
 /// visible (filtered, grouped) order of notes.
-///
-/// Plain `ObservableObject` (not `@State`) per this project's constraint: the
-/// `@State` macro needs the `SwiftUIMacros` compiler plugin, which isn't
-/// available under `swift build` without Xcode.app.
 final class SelectionModel: ObservableObject {
     @Published var selectedIDs: Set<UUID> = []
     @Published var editingID: UUID?
