@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+INSTALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --install)
+      INSTALL=1
+      ;;
+    *)
+      echo "Unknown argument: $arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -29,3 +42,10 @@ fi
 echo "Signed with identity: $IDENTITY"
 
 echo "$ROOT_DIR/$APP_BUNDLE"
+
+if [ "$INSTALL" -eq 1 ]; then
+  INSTALLED_APP="/Applications/Nickel.app"
+  rm -rf "$INSTALLED_APP"
+  ditto "$APP_BUNDLE" "$INSTALLED_APP"
+  echo "Installed to: $INSTALLED_APP"
+fi

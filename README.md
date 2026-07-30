@@ -1,9 +1,17 @@
 # Nickel
 
-Nickel is a native macOS menu-bar scratchpad app: a lightweight, always-available
-floating panel for quick notes, built with AppKit and SwiftUI on top of SwiftPM
-(no Xcode project required). Double-tap Shift anywhere on the system to grab
-whatever's selected, or bring up the panel and jot something down directly.
+Nickel is a personal-use knockoff of [Copper by shadcn](https://shadcn.com/copper),
+built because I wanted the workflow it describes and didn't want to wait. If
+you want the real, polished thing — and to support the person who designed
+it — [buy Copper](https://shadcn.com/copper) instead. This is a rough,
+free stand-in for personal use, not a replacement for it.
+
+Nickel is a macOS menu-bar scratchpad: double-tap Shift anywhere to capture
+whatever text you have selected, or to toggle a floating panel if nothing's
+selected. It's part to-do list, part clipboard, part scratchpad for
+AI-chat workflows — jot down prompts or snippets, then copy them back into
+Claude, ChatGPT, or Cursor, and check them off as you go. Notes are stored
+in a local JSON file: no accounts, no sync, no cloud.
 
 ## Features
 
@@ -13,8 +21,8 @@ whatever's selected, or bring up the panel and jot something down directly.
   without stealing focus from what you were doing. Double-tapping Shift with
   nothing selected instead toggles the panel.
 - **Floating panel**: a borderless, always-on-top scratchpad panel with search,
-  a note composer, checkable notes, multi-select, inline editing, and
-  drag-free custom lists ("Move to…").
+  a note composer, checkable notes, multi-select, inline editing, expand/
+  collapse for long notes, and drag-free custom lists ("Move to…").
 - **Menu bar item**: left-click toggles the panel; right-click shows an
   overflow menu (Toggle Panel, Quit).
 - **Panel overflow menu**: Copy All as List, a Launch at Login toggle, and
@@ -27,50 +35,48 @@ whatever's selected, or bring up the panel and jot something down directly.
 - **Note length cap**: individual notes are capped at 20,000 characters
   (truncated with `…`) so an accidental "select all" on a huge document can't
   bloat the notes file.
+- **Local-only storage**: notes live in a plain JSON file on disk. No
+  accounts, no telemetry, no cloud sync.
 
 ## Keyboard shortcuts
 
-All shortcuts below apply while the panel is focused, over the current
-selection (unless noted otherwise).
+| Shortcut | Action                                                    |
+| -------- | ---------------------------------------------------------- |
+| **⇧⇧**   | Capture the current selection, or toggle the panel if nothing's selected |
+| **⌘N**   | Focus the composer                                          |
+| **⌘F**   | Focus search                                                |
+| **⌘A**   | Select all notes                                            |
+| **⌘C**   | Copy selected note(s) as plain text                         |
+| **⇧⌘C**  | Copy selected note(s) as a `- ` bulleted list                |
+| **Space**| Toggle done / not-done on the selection                     |
+| **⌘E**   | Expand/collapse the selected note(s)                        |
+| **Return**| Edit the selected note (single selection only)              |
+| **⇧⌘M**  | Merge the selected notes into one                            |
+| **⌫**    | Delete the selected note(s)                                 |
+| **Esc**  | Clear selection, cancel an edit, or dismiss the panel        |
 
-| Shortcut                            | Action                                                            |
-| ------------------------------------ | ------------------------------------------------------------------ |
-| Double-tap **Shift**                 | Capture the current selection (anywhere), or toggle the panel if nothing's selected |
-| **⌘C**                               | Copy selected note(s) as plain text                                |
-| **⇧⌘C**                              | Copy selected note(s) as a `- ` bulleted list                      |
-| **⌘N**                               | Focus the composer to jump straight into typing a note              |
-| **Space**                            | Toggle done / not-done on the selection                            |
-| **Return**                           | Edit the selected note (single selection only)                     |
-| **⇧⌘M**                              | Merge the selected notes into one                                  |
-| **⌫ / Forward Delete**               | Delete the selected note(s)                                        |
-| **↑ / ↓**                            | Move the selection; hold ⇧ to extend a range                       |
-| **Esc**                              | Clear selection, or hide the panel if nothing's selected            |
-| **Esc** (search focused, has text)   | Clear the search, keep focus in the search field                   |
-| **Esc** (search focused, empty)      | Leave the search field                                              |
-| **Esc** (editing a note)             | Cancel the edit, discarding changes                                 |
-| **Return** (editing a note)          | Commit the edit                                                     |
-| **Return** (composer focused)        | Add the note and keep focus in the composer for the next one        |
-| **⇧Return** (composer focused)       | Insert a line break in the note                                     |
-| **Esc** (composer focused)           | Leave the composer                                                  |
+Arrow keys move the selection; hold ⇧ to extend a range.
 
-## Install & build
+## Build & install
 
-Requires the Xcode Command Line Tools (`xcode-select --install`) — no full
-Xcode installation is needed or used.
+Requires macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`)
+— a full Xcode.app install also works and isn't required either way.
 
 ```bash
-swift build                 # compile the SwiftPM executable (debug)
-bash scripts/build-app.sh   # release-build, assemble build/Nickel.app, code-sign it
-open build/Nickel.app       # launch
+swift build                          # compile the SwiftPM executable (debug)
+bash scripts/build-app.sh            # release build, assemble build/Nickel.app, code-sign it
+bash scripts/build-app.sh --install  # same, then install to /Applications/Nickel.app
 ```
 
-On first launch, Nickel will prompt for **Accessibility** access (System
+### Accessibility permission
+
+On first launch, Nickel prompts for **Accessibility** access (System
 Settings → Privacy & Security → Accessibility). This is required so it can
 detect the global double-Shift gesture and read the current text selection
 from other apps. Nickel polls for the permission and starts up automatically
 once it's granted — no relaunch needed.
 
-### Signing caveat
+### Signing note
 
 `scripts/build-app.sh` signs with a self-signed "Nickel Dev Signing" identity
 in the login keychain when it's present and trusted, falling back to ad-hoc
@@ -79,18 +85,9 @@ installed and trusted, the signature stays stable across rebuilds, so macOS
 keeps recognizing the app as the same one and your Accessibility grant
 survives rebuilds. Under the ad-hoc fallback there's no stable identity:
 every rebuild makes macOS treat the app as "new" and re-prompt for
-Accessibility access (and may show it as already "granted" for a stale entry
-that no longer matches). If double-Shift stops being detected after a
-rebuild, re-grant Accessibility access for Nickel in System Settings.
+Accessibility access. If double-Shift stops being detected after a rebuild,
+re-grant Accessibility access for Nickel in System Settings.
 
-## Architecture notes
+## License
 
-- Built entirely with SwiftPM (`swift build`); there is no `.xcodeproj`.
-- SwiftUI's `@State` and `@FocusState` property-wrapper macros require the
-  `SwiftUIMacros` compiler plugin, which ships only with Xcode.app and isn't
-  available under a CLI-tools-only `swift build`. Wherever the original
-  Copper-style UI would reach for `@State`, this codebase instead uses a
-  plain `ObservableObject` + `@StateObject` (e.g. `PanelUIState`,
-  `SelectionModel`), or a small `NSViewRepresentable` with its own
-  `Coordinator` when precise AppKit control is needed (e.g. `SearchField`,
-  `InlineTextEditor`).
+MIT — see [LICENSE](LICENSE).
