@@ -86,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
                 if let text, !text.isEmpty {
                     self.noteStore.add(text: text, sourceApp: appName, isCapture: true)
-                    CaptureHUD.shared.show()
+                    CaptureHUD.show()
                 } else {
                     self.panel?.toggle()
                 }
