@@ -6,20 +6,22 @@ you want the real, polished thing — and to support the person who designed
 it — [buy Copper](https://shadcn.com/copper) instead. This is a rough,
 free stand-in for personal use, not a replacement for it.
 
-Nickel is a macOS menu-bar scratchpad: double-tap Shift anywhere to capture
-whatever text you have selected, or to toggle a floating panel if nothing's
-selected. It's part to-do list, part clipboard, part scratchpad for
-AI-chat workflows — jot down prompts or snippets, then copy them back into
-Claude, ChatGPT, or Cursor, and check them off as you go. Notes are stored
-in a local JSON file: no accounts, no sync, no cloud.
+Nickel is a macOS menu-bar scratchpad: double-tap the left Shift key anywhere
+to capture whatever text you have selected, or double-tap the right Shift
+key to toggle a floating panel. It's part to-do list, part clipboard, part
+scratchpad for AI-chat workflows — jot down prompts or snippets, then copy
+them back into Claude, ChatGPT, or Cursor, and check them off as you go.
+Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 
 ## Features
 
-- **Global double-Shift capture**: double-tap Shift while text is selected in
-  any app to snapshot it straight into Nickel (via Accessibility, falling back
-  to a ⌘C pasteboard snapshot), with a small "Captured" HUD confirming it —
-  without stealing focus from what you were doing. Double-tapping Shift with
-  nothing selected instead toggles the panel.
+- **Global double-Shift capture**: double-tap the left Shift key while text is
+  selected in any app to snapshot it straight into Nickel (via Accessibility,
+  falling back to a ⌘C pasteboard snapshot), with a small "Captured" HUD
+  confirming it — without stealing focus from what you were doing. If nothing's
+  selected, a small HUD says so instead.
+- **Global double-Shift panel toggle**: double-tap the right Shift key
+  anywhere to show or hide the floating panel.
 - **Floating panel**: a borderless, always-on-top scratchpad panel with search,
   a note composer, checkable notes, multi-select, inline editing, expand/
   collapse for long notes, and drag-free custom lists ("Move to…").
@@ -30,8 +32,8 @@ in a local JSON file: no accounts, no sync, no cloud.
 - **Frame persistence**: the panel remembers where you left it (position and
   size) across relaunches, and clamps back onscreen if a display is
   disconnected.
-- **Duplicate-capture guard**: double-shifting twice on the same selection
-  within 2 seconds won't create a second note.
+- **Duplicate-capture guard**: double-tapping left Shift twice on the same
+  selection within 2 seconds won't create a second note.
 - **Note length cap**: individual notes are capped at 20,000 characters
   (truncated with `…`) so an accidental "select all" on a huge document can't
   bloat the notes file.
@@ -42,7 +44,8 @@ in a local JSON file: no accounts, no sync, no cloud.
 
 | Shortcut | Action                                                    |
 | -------- | ---------------------------------------------------------- |
-| **⇧⇧**   | Capture the current selection, or toggle the panel if nothing's selected |
+| **Left ⇧⇧**  | Capture the current selection                          |
+| **Right ⇧⇧** | Toggle the floating panel                               |
 | **⌘N**   | Focus the composer                                          |
 | **⌘F**   | Focus search                                                |
 | **⌘A**   | Select all notes                                            |

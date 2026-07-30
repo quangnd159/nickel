@@ -22,15 +22,15 @@ private final class HUDPanel: NSPanel {
 enum CaptureHUD {
     private static var current: HUDInstance?
 
-    static func show() {
+    static func show(message: String = "Captured", symbolName: String = "checkmark.circle.fill") {
         if Thread.isMainThread {
-            showOnMain()
+            showOnMain(message: message, symbolName: symbolName)
         } else {
-            DispatchQueue.main.async { showOnMain() }
+            DispatchQueue.main.async { showOnMain(message: message, symbolName: symbolName) }
         }
     }
 
-    private static func showOnMain() {
+    private static func showOnMain(message: String, symbolName: String) {
         assert(Thread.isMainThread, "CaptureHUD.show() must run on the main thread")
 
         // Rapid captures shouldn't stack: cancel and dismiss whatever is currently showing.
@@ -44,7 +44,7 @@ enum CaptureHUD {
                 current = nil
             }
         }
-        instance.show()
+        instance.show(message: message, symbolName: symbolName)
     }
 }
 
@@ -54,8 +54,8 @@ private final class HUDInstance {
     private var hideWorkItem: DispatchWorkItem?
     var onFinished: (() -> Void)?
 
-    func show() {
-        let panel = makePanel()
+    func show(message: String, symbolName: String) {
+        let panel = makePanel(message: message, symbolName: symbolName)
         self.panel = panel
 
         panel.alphaValue = 0
@@ -96,9 +96,10 @@ private final class HUDInstance {
         onFinished?()
     }
 
-    private func makePanel() -> HUDPanel {
+    private func makePanel(message: String, symbolName: String) -> HUDPanel {
+        let width = HUDContentView.width(forMessage: message)
         let panel = HUDPanel(
-            contentRect: NSRect(origin: .zero, size: NSSize(width: 140, height: 40)),
+            contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: 40)),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -111,7 +112,7 @@ private final class HUDInstance {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
-        panel.contentView = HUDContentView()
+        panel.contentView = HUDContentView(message: message, symbolName: symbolName)
         position(panel)
         return panel
     }
@@ -132,7 +133,7 @@ private final class HUDInstance {
 /// Deliberately contains no SwiftUI (no `NSHostingView`) so the HUD window can't host a
 /// ViewBridge remote view — see the note on `HUDPanel` above.
 private final class HUDContentView: NSView {
-    init() {
+    init(message: String, symbolName: String) {
         super.init(frame: .zero)
 
         let blur = NSVisualEffectView()
@@ -143,12 +144,12 @@ private final class HUDContentView: NSView {
         addSubview(blur)
 
         let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
+        icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
         icon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
         icon.translatesAutoresizingMaskIntoConstraints = false
         addSubview(icon)
 
-        let label = NSTextField(labelWithString: "Captured")
+        let label = NSTextField(labelWithString: message)
         label.font = .systemFont(ofSize: 13, weight: .medium)
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
@@ -169,6 +170,15 @@ private final class HUDContentView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    /// Sized to fit the message (icon + margins + text), with a floor matching the
+    /// original fixed-width "Captured" toast so short messages don't look cramped.
+    static func width(forMessage message: String) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        let textWidth = (message as NSString).size(withAttributes: [.font: font]).width
+        let chrome: CGFloat = 14 + 13 + 6 + 14 // leading margin + icon + spacing + trailing margin
+        return max(140, ceil(textWidth + chrome))
+    }
 
     override func layout() {
         super.layout()

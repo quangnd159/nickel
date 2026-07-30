@@ -273,7 +273,7 @@ struct PanelView: View {
 
     private var emptyState: some View {
         VStack(spacing: 6) {
-            Text("Double-tap Shift anywhere to capture")
+            Text("Double-tap left Shift anywhere to capture")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
 

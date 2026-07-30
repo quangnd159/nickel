@@ -31,7 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // right-click only, in `statusItemClicked`.
         statusItem = item
 
-        HotkeyMonitor.shared.onDoubleShift = { [weak self] in self?.handleDoubleShift() }
+        HotkeyMonitor.shared.onDoubleShift = { [weak self] side in self?.handleDoubleShift(side) }
         startHotkeyMonitorOrPromptForAccess()
 
         panel.toggle()
@@ -61,17 +61,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleDoubleShift() {
-        // The panel is a nonactivating NSPanel, so it can be key without
-        // being the frontmost app; while it's key the user is interacting
-        // with it (selecting notes, renaming a list, typing), so
-        // double-shift dismisses it instead of triggering a new capture
-        // (in-progress edits commit via the existing focus-loss paths).
-        if panel?.isKeyWindow == true {
-            debugLog("handleDoubleShift: panel is key window, hiding it")
+    private func handleDoubleShift(_ side: ShiftSide) {
+        switch side {
+        case .right:
+            // The panel is a nonactivating NSPanel, so it can be key without being the
+            // frontmost app; toggling here also dismisses it while it's key, which commits
+            // any in-progress edit (renaming a list, composing) via the existing
+            // focus-loss paths.
             panel?.toggle()
-            return
+        case .left:
+            captureSelectedText()
         }
+    }
+
+    private func captureSelectedText() {
         guard !isCapturing else { return }
         isCapturing = true
 
@@ -86,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.noteStore.add(text: text, sourceApp: appName, isCapture: true)
                     CaptureHUD.show()
                 } else {
-                    self.panel?.toggle()
+                    CaptureHUD.show(message: "No text selected", symbolName: "exclamationmark.circle.fill")
                 }
             }
         }
