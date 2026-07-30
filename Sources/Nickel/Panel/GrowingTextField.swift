@@ -73,15 +73,82 @@ class GrowingTextField: NSTextField {
     /// attributes so text the user types (not just what's set via
     /// `stringValue`) wraps with the same metrics as the display label. This
     /// alone isn't sufficient for text that's already in the field when
-    /// editing begins (see `InlineTextEditor`, which pins the field editor's
-    /// `textStorage` directly for that case); it's kept here mainly so
-    /// intrinsic-size measurement and freshly-typed text agree.
+    /// editing begins (see `syncIntrinsicSizeWithEditor()`, which pins the
+    /// field editor's `textStorage` directly for that case); it's kept here
+    /// mainly so intrinsic-size measurement and freshly-typed text agree.
     override func becomeFirstResponder() -> Bool {
         let became = super.becomeFirstResponder()
         if became, let style = fixedParagraphStyle, let editor = currentEditor() as? NSTextView {
             editor.typingAttributes[.paragraphStyle] = style
         }
         return became
+    }
+
+    /// Guards re-entrancy in `syncIntrinsicSizeWithEditor()`: it mutates the
+    /// field editor's `textStorage`, which could in principle re-post the
+    /// control's text-changed notification before the call returns.
+    private var isSyncingWithEditor = false
+
+    /// The single mechanism both `ComposerField` and `InlineTextEditor` rely
+    /// on to keep the card's intrinsic height tracking live-typed text — call
+    /// from a delegate's `controlTextDidChange(_:)`, from
+    /// `controlTextDidBeginEditing(_:)`, and once after the initial
+    /// programmatic focus.
+    ///
+    /// `intrinsicContentSize` measures via `cell.cellSize(forBounds:)`, but
+    /// the cell's own `attributedStringValue` is a snapshot from whenever it
+    /// was last explicitly set (e.g. `makeNSView`'s initial `stringValue =
+    /// text`) — it is *not* kept live by AppKit while the field editor is
+    /// being typed into. Without re-syncing it here, `intrinsicContentSize`
+    /// keeps measuring stale (pre-edit) text, which is why the card didn't
+    /// grow while typing. This re-syncs the cell from the field editor's
+    /// current `textStorage` directly (bypassing `stringValue`'s didSet, so
+    /// this doesn't recurse into `applyParagraphStyle`), then invalidates.
+    ///
+    /// For fields with `fixedParagraphStyle` set, this also re-stamps that
+    /// style onto the editor's `textStorage` first (typing at the very start
+    /// of the field editor's text can otherwise drop the paragraph style's
+    /// line-height info for that line — a documented `NSTextView` quirk —
+    /// hence re-applying it over the full note-sized text on each change
+    /// rather than special-casing just the first line). This restamp, added
+    /// in cc5ca9b, must run *before* the cell resync above and must not skip
+    /// the `invalidateIntrinsicContentSize()` call below, or the card stops
+    /// growing even though the restamped text measures correctly.
+    func syncIntrinsicSizeWithEditor() {
+        guard !isSyncingWithEditor else { return }
+        isSyncingWithEditor = true
+        defer { isSyncingWithEditor = false }
+
+        if let editor = currentEditor() as? NSTextView {
+            if let style = fixedParagraphStyle {
+                Self.stamp(paragraphStyle: style, font: font, onto: editor)
+            }
+            if let textStorage = editor.textStorage {
+                cell?.attributedStringValue = textStorage
+            }
+        }
+        invalidateIntrinsicContentSize()
+    }
+
+    /// Forces the field editor to a fixed line height: `defaultParagraphStyle`
+    /// and `typingAttributes` for anything typed from here on, and the style
+    /// plus base font stamped directly onto `textStorage` for text already in
+    /// the field when editing began (which typing attributes alone don't
+    /// reliably cover).
+    private static func stamp(paragraphStyle: NSParagraphStyle, font: NSFont?, onto editor: NSTextView) {
+        let font = font ?? .systemFont(ofSize: NSFont.systemFontSize)
+        editor.defaultParagraphStyle = paragraphStyle
+        editor.typingAttributes = [
+            .paragraphStyle: paragraphStyle,
+            .font: font,
+            .foregroundColor: NSColor.labelColor
+        ]
+        guard let textStorage = editor.textStorage, textStorage.length > 0 else { return }
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        textStorage.beginEditing()
+        textStorage.addAttribute(.paragraphStyle, value: paragraphStyle, range: fullRange)
+        textStorage.addAttribute(.font, value: font, range: fullRange)
+        textStorage.endEditing()
     }
 
     private func applyParagraphStyle() {

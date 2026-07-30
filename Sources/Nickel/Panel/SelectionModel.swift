@@ -12,6 +12,11 @@ final class SelectionModel: ObservableObject {
     @Published var editingID: UUID?
     @Published var editingText: String = ""
 
+    /// Notes currently showing full (untruncated) text in the list, rather
+    /// than the default 3-line clamp — session-only (not persisted to the
+    /// store), toggled via the context menu's "Expand"/"Collapse" or ⌘E.
+    @Published var expandedIDs: Set<UUID> = []
+
     /// The list name currently in inline section-header rename mode, if any
     /// (set by `PanelActions.createListWithSelection()` for a just-created
     /// list, or by double-clicking/context-menuing a header in
@@ -147,6 +152,20 @@ final class SelectionModel: ObservableObject {
     func endRenamingList() {
         renamingListName = nil
         renameText = ""
+    }
+
+    // MARK: - Expand / collapse
+
+    /// Toggles the expanded state of `ids` as a group: if every one of them
+    /// is currently expanded, collapses them all; otherwise expands them
+    /// all. Matches the "Mark as Done" toggle's all-or-nothing convention.
+    func toggleExpanded(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        if ids.isSubset(of: expandedIDs) {
+            expandedIDs.subtract(ids)
+        } else {
+            expandedIDs.formUnion(ids)
+        }
     }
 
     // MARK: - Select all

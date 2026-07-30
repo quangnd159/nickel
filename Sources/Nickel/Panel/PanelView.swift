@@ -176,6 +176,11 @@ struct PanelView: View {
                         }
                     }
                     .animation(rowSpring, value: flatVisibleIDs)
+                    // Expand/collapse changes a row's height without adding
+                    // or removing it from `flatVisibleIDs`, so it needs its
+                    // own `.animation` keyed off `expandedIDs` to pick up the
+                    // same spring.
+                    .animation(rowSpring, value: selection.expandedIDs)
                 }
                 .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
             }

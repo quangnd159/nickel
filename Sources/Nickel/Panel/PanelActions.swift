@@ -33,6 +33,11 @@ final class PanelActions: ObservableObject {
         return !notes.isEmpty && notes.allSatisfy(\.isDone)
     }
 
+    var allSelectedAreExpanded: Bool {
+        let ids = selection.selectedIDs
+        return !ids.isEmpty && ids.isSubset(of: selection.expandedIDs)
+    }
+
     // MARK: - Copy
 
     func copy() {
@@ -52,6 +57,15 @@ final class PanelActions: ObservableObject {
     func toggleDone() {
         guard !selection.selectedIDs.isEmpty else { return }
         store.toggleDone(ids: selection.selectedIDs)
+    }
+
+    /// Expand/collapse toggle, driven by both the context menu item and ⌘E
+    /// (see `FloatingPanel.handle(_:actions:)` — a context menu's own
+    /// `.keyboardShortcut` doesn't register globally on macOS, so the panel
+    /// needs its own key handling that calls the same method).
+    func toggleExpanded() {
+        guard !selection.selectedIDs.isEmpty else { return }
+        selection.toggleExpanded(ids: selection.selectedIDs)
     }
 
     func startEditingIfSingleSelected() {

@@ -35,10 +35,20 @@ struct NoteLabel: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: NoteLabelField, context: Context) {
-        nsView.maximumNumberOfLines = maximumNumberOfLines
+        let linesChanged = nsView.maximumNumberOfLines != maximumNumberOfLines
+        if linesChanged {
+            nsView.maximumNumberOfLines = maximumNumberOfLines
+        }
         let attributed = NoteLabel.attributedString(from: text)
-        if nsView.attributedStringValue != attributed {
+        let textChanged = nsView.attributedStringValue != attributed
+        if textChanged {
             nsView.attributedStringValue = attributed
+        }
+        // A line-limit change (expand/collapse) alone doesn't change the
+        // attributed string, so it needs its own invalidation trigger —
+        // otherwise toggling `maximumNumberOfLines` from 3 to 0 (or back)
+        // would leave the card measuring against the old clamp.
+        if linesChanged || textChanged {
             nsView.invalidateIntrinsicContentSize()
         }
     }

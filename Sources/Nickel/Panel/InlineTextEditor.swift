@@ -17,9 +17,11 @@ import AppKit
 /// card. `GrowingTextField.fixedParagraphStyle` covers intrinsic-size
 /// measurement and freshly-typed text, but the window's field editor doesn't
 /// reliably honor a paragraph style from typing attributes for text that's
-/// already present when editing begins — so `pinFixedLineHeight(in:)` also
-/// stamps the style directly onto the field editor's `textStorage` right
-/// after focusing.
+/// already present when editing begins — so
+/// `GrowingTextField.syncIntrinsicSizeWithEditor()` also stamps the style
+/// directly onto the field editor's `textStorage` right after focusing, on
+/// every keystroke, and keeps the card's intrinsic height tracking that live
+/// text (see that method's doc comment for why both steps are needed).
 ///
 /// Backed by `NSViewRepresentable` rather than SwiftUI's `TextField(axis:
 /// .vertical)` bound to `@State`, since `@State` isn't available in this
@@ -71,8 +73,9 @@ struct InlineTextEditor: NSViewRepresentable {
     private func focusAtEnd(_ field: NSTextField) {
         func placeCaretAtEnd() {
             field.window?.makeFirstResponder(field)
-            guard let editor = field.currentEditor() as? NSTextView else { return }
-            Self.pinFixedLineHeight(in: editor)
+            guard let editor = field.currentEditor() as? NSTextView,
+                  let growingField = field as? GrowingTextField else { return }
+            growingField.syncIntrinsicSizeWithEditor()
             let end = (editor.string as NSString).length
             editor.selectedRange = NSRange(location: end, length: 0)
         }
@@ -86,38 +89,11 @@ struct InlineTextEditor: NSViewRepresentable {
         }
     }
 
-    /// Forces the field editor to the same fixed line height as the display
-    /// label and freshly-typed text: `defaultParagraphStyle` and
-    /// `typingAttributes` for anything typed from here on, and the style plus
-    /// base font stamped directly onto `textStorage` for the text already in
-    /// the field when editing began (which typing attributes alone don't
-    /// reliably cover — see this file's doc comment).
-    fileprivate static func pinFixedLineHeight(in editor: NSTextView) {
-        let style = NoteTextMetrics.makeParagraphStyle()
-        let font = NSFont.systemFont(ofSize: NoteTextMetrics.fontSize)
-        editor.defaultParagraphStyle = style
-        editor.typingAttributes = [
-            .paragraphStyle: style,
-            .font: font,
-            .foregroundColor: NSColor.labelColor
-        ]
-        guard let textStorage = editor.textStorage, textStorage.length > 0 else { return }
-        let fullRange = NSRange(location: 0, length: textStorage.length)
-        textStorage.beginEditing()
-        textStorage.addAttribute(.paragraphStyle, value: style, range: fullRange)
-        textStorage.addAttribute(.font, value: font, range: fullRange)
-        textStorage.endEditing()
-    }
-
     final class Coordinator: NSObject, NSTextFieldDelegate {
         private let text: Binding<String>
         private let onCommit: () -> Void
         private let onCancel: () -> Void
         private var didFinish = false
-        /// Guards against re-entering `pinFixedLineHeight` from within itself:
-        /// it edits `textStorage`, which could in principle re-post the
-        /// control's text-changed notification before this call returns.
-        private var isRestampingLineHeight = false
 
         init(text: Binding<String>, onCommit: @escaping () -> Void, onCancel: @escaping () -> Void) {
             self.text = text
@@ -126,29 +102,23 @@ struct InlineTextEditor: NSViewRepresentable {
         }
 
         /// Belt-and-braces alongside the `focusAtEnd` retry loop: whichever
-        /// path actually lands the field editor, this re-pins the fixed line
-        /// height right as editing begins.
+        /// path actually lands the field editor, this re-syncs the card's
+        /// intrinsic size (and re-pins the fixed line height) right as
+        /// editing begins, so the card is already at full text height before
+        /// the first keystroke.
         func controlTextDidBeginEditing(_ notification: Notification) {
-            guard let field = notification.object as? NSTextField,
-                  let editor = field.currentEditor() as? NSTextView else { return }
-            InlineTextEditor.pinFixedLineHeight(in: editor)
+            guard let field = notification.object as? GrowingTextField else { return }
+            field.syncIntrinsicSizeWithEditor()
         }
 
-        /// Re-stamps the fixed line height on every keystroke. Typing at the
-        /// very start of the field editor's text can otherwise drop the
-        /// paragraph style's line-height info for that line (a documented
-        /// `NSTextView` quirk), so this cheaply re-applies it over the full
-        /// (note-sized) text on each change rather than trying to special-case
-        /// just the first line.
+        /// Keeps the card's intrinsic height tracking the live-typed text and
+        /// re-stamps the fixed line height on every keystroke — see
+        /// `GrowingTextField.syncIntrinsicSizeWithEditor()` for why both are
+        /// needed.
         func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSTextField else { return }
+            guard let field = notification.object as? GrowingTextField else { return }
             text.wrappedValue = field.stringValue
-            field.invalidateIntrinsicContentSize()
-
-            guard !isRestampingLineHeight, let editor = field.currentEditor() as? NSTextView else { return }
-            isRestampingLineHeight = true
-            InlineTextEditor.pinFixedLineHeight(in: editor)
-            isRestampingLineHeight = false
+            field.syncIntrinsicSizeWithEditor()
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

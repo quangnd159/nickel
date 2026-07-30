@@ -93,9 +93,9 @@ struct ComposerField: NSViewRepresentable {
         }
 
         func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? NSTextField else { return }
+            guard let field = notification.object as? GrowingTextField else { return }
             text.wrappedValue = field.stringValue
-            field.invalidateIntrinsicContentSize()
+            field.syncIntrinsicSizeWithEditor()
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

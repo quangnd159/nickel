@@ -38,9 +38,12 @@ struct NoteRow: View {
                     )
                     .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
-                    NoteLabel(text: note.text)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .opacity(note.isDone ? 0.5 : 1)
+                    NoteLabel(
+                        text: note.text,
+                        maximumNumberOfLines: selection.expandedIDs.contains(note.id) ? 0 : 3
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .opacity(note.isDone ? 0.5 : 1)
                 }
             }
         }
@@ -128,6 +131,12 @@ struct NoteRow: View {
             actions.toggleDone()
         }
         .keyboardShortcut(" ", modifiers: [])
+
+        Button(actions.allSelectedAreExpanded ? "Collapse" : "Expand") {
+            actions.toggleExpanded()
+        }
+        .keyboardShortcut("e", modifiers: .command)
+        .disabled(selection.selectedIDs.isEmpty)
 
         Button("Edit") { actions.startEditingIfSingleSelected() }
             .keyboardShortcut(.return, modifiers: [])
