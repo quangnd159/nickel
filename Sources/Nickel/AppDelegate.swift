@@ -3,7 +3,7 @@ import AppKit
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: FloatingPanel?
-    private var onboardingWindow: PermissionsOnboardingWindow?
+    private var trustPollTimer: Timer?
 
     private let noteStore = NoteStore()
     private var isCapturing = false
@@ -46,17 +46,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // Triggers the native "Nickel.app would like to control this computer"
+        // system dialog, which also registers Nickel in the Accessibility list.
+        // This is the single onboarding surface; we don't show a custom window
+        // on top of it.
         Permissions.requestIfNeeded()
 
-        let window = PermissionsOnboardingWindow()
-        window.onGranted = { [weak self] in
+        trustPollTimer?.invalidate()
+        trustPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+            guard Permissions.isTrusted else { return }
+            timer.invalidate()
+            self?.trustPollTimer = nil
             HotkeyMonitor.shared.start()
-            self?.onboardingWindow = nil
         }
-        window.startPolling()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        onboardingWindow = window
     }
 
     private func handleDoubleShift() {
@@ -83,6 +85,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
 
+        if !Permissions.isTrusted {
+            let grantItem = NSMenuItem(
+                title: "Grant Accessibility Access…",
+                action: #selector(grantAccessibilityAccess),
+                keyEquivalent: ""
+            )
+            grantItem.target = self
+            menu.addItem(grantItem)
+            menu.addItem(.separator())
+        }
+
         let toggleItem = NSMenuItem(
             title: "Toggle Panel",
             action: #selector(togglePanel),
@@ -107,6 +120,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel?.toggle()
     }
 
+    @objc private func grantAccessibilityAccess() {
+        Permissions.openAccessibilitySettings()
+    }
+
     /// Left click toggles the panel directly; right click shows the overflow
     /// menu (Toggle Panel / Quit). Distinguishing the two requires *not*
     /// assigning `statusItem.menu` permanently — instead the menu is
@@ -127,6 +144,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        trustPollTimer?.invalidate()
         noteStore.saveNow()
     }
 }
