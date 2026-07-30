@@ -4,9 +4,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var panel: FloatingPanel?
     private var trustPollTimer: Timer?
-    /// Set once we've fired the native Input Monitoring prompt, so the poll
-    /// timer never requests it twice.
-    private var requestedInputMonitoring = false
 
     private let noteStore = NoteStore()
     private var isCapturing = false
@@ -44,26 +41,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Global hotkey detection needs both Accessibility (`AXIsProcessTrusted`)
-    /// and Input Monitoring (`IOHIDCheckAccess`) on recent macOS. The two
-    /// native prompts are staggered rather than fired together: Input
-    /// Monitoring is only requested once Accessibility is already granted,
-    /// so the user isn't hit with two system dialogs at once.
     private func startHotkeyMonitorOrPromptForAccess() {
-        if Permissions.isTrusted && Permissions.hasInputMonitoring {
+        if Permissions.isTrusted {
             HotkeyMonitor.shared.start()
             return
         }
 
-        if !Permissions.isTrusted {
-            // Triggers the native "Nickel.app would like to control this
-            // computer" system dialog, which also registers Nickel in the
-            // Accessibility list.
-            Permissions.requestIfNeeded()
-        } else if !Permissions.hasInputMonitoring {
-            requestedInputMonitoring = true
-            Permissions.requestInputMonitoring()
-        }
+        // Triggers the native "Nickel.app would like to control this
+        // computer" system dialog, which also registers Nickel in the
+        // Accessibility list.
+        Permissions.requestIfNeeded()
 
         trustPollTimer?.invalidate()
         trustPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
@@ -72,13 +59,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             guard Permissions.isTrusted else { return }
-            guard Permissions.hasInputMonitoring else {
-                if !self.requestedInputMonitoring {
-                    self.requestedInputMonitoring = true
-                    Permissions.requestInputMonitoring()
-                }
-                return
-            }
             timer.invalidate()
             self.trustPollTimer = nil
             HotkeyMonitor.shared.start()
@@ -159,15 +139,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             grantItem.target = self
             menu.addItem(grantItem)
             menu.addItem(.separator())
-        } else if !Permissions.hasInputMonitoring {
-            let grantItem = NSMenuItem(
-                title: "Grant Input Monitoring…",
-                action: #selector(grantInputMonitoringAccess),
-                keyEquivalent: ""
-            )
-            grantItem.target = self
-            menu.addItem(grantItem)
-            menu.addItem(.separator())
         }
 
         let toggleItem = NSMenuItem(
@@ -196,10 +167,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func grantAccessibilityAccess() {
         Permissions.openAccessibilitySettings()
-    }
-
-    @objc private func grantInputMonitoringAccess() {
-        Permissions.openInputMonitoringSettings()
     }
 
     /// Left click toggles the panel directly; right click shows the overflow

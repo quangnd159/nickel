@@ -21,7 +21,7 @@ final class HotkeyMonitor {
     private init() {}
 
     func start() {
-        guard Permissions.isTrusted, Permissions.hasInputMonitoring, globalMonitor == nil else { return }
+        guard Permissions.isTrusted, globalMonitor == nil else { return }
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
             self?.handle(event)
@@ -31,10 +31,7 @@ final class HotkeyMonitor {
             return event
         }
 
-        debugLog(
-            "HotkeyMonitor.start: isTrusted=\(Permissions.isTrusted) " +
-            "hasInputMonitoring=\(Permissions.hasInputMonitoring); monitors installed"
-        )
+        debugLog("HotkeyMonitor.start: isTrusted=\(Permissions.isTrusted); monitors installed")
     }
 
     func stop() {
