@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 final class FloatingPanel: NSPanel {
-    convenience init(store: CapturedStore) {
+    convenience init(store: NoteStore) {
         let size = NSSize(width: 360, height: 560)
         self.init(
             contentRect: NSRect(origin: .zero, size: size),

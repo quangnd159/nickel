@@ -5,13 +5,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: FloatingPanel?
     private var onboardingWindow: PermissionsOnboardingWindow?
 
-    private let capturedStore = CapturedStore()
+    private let noteStore = NoteStore()
     private var isCapturing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
-        let panel = FloatingPanel(store: capturedStore)
+        let panel = FloatingPanel(store: noteStore)
         self.panel = panel
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -59,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 defer { self.isCapturing = false }
 
                 if let text, !text.isEmpty {
-                    self.capturedStore.add(text: text, app: appName)
+                    self.noteStore.add(text: text, sourceApp: appName)
                     CaptureHUD.shared.show()
                 } else {
                     self.panel?.toggle()
@@ -93,5 +93,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePanel() {
         panel?.toggle()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        noteStore.saveNow()
     }
 }
