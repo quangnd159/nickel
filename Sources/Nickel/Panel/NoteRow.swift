@@ -49,14 +49,6 @@ struct NoteRow: View {
                         .opacity(note.isDone ? 0.5 : 1)
                 }
             }
-            // Row-level click/double-click gestures live on this column only
-            // (not the outer HStack), so clicking the checkbox can never
-            // change selection — it's a work-tracking control (Copper's
-            // check-off-as-you-go flow), and must behave like
-            // Reminders/Things, where tapping the circle only toggles done.
-            .contentShape(Rectangle())
-            .simultaneousGesture(TapGesture(count: 1).onEnded(handleSingleClick))
-            .simultaneousGesture(TapGesture(count: 2).onEnded(handleDoubleClick))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
@@ -70,7 +62,18 @@ struct NoteRow: View {
                 .opacity(isSelected ? 1 : 0)
         )
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
+        // Row-wide click target: clicking anywhere on the card (including its
+        // padding) selects it. Plain (non-simultaneous) `onTapGesture`s here
+        // are exclusive gestures, so the checkbox `Button` — a child control
+        // with its own tap handling — wins hits on itself and this row-level
+        // gesture never fires for it; that keeps the checkbox selection-inert
+        // (a pure work-tracking control, Copper/Reminders/Things-style)
+        // without needing to scope the gesture to the text column only.
+        // `count: 2` is attached before `count: 1` so both fire independently
+        // with no double-click wait delaying the single-click response.
         .contentShape(Rectangle())
+        .onTapGesture(count: 2) { handleDoubleClick() }
+        .onTapGesture { handleSingleClick() }
         .contextMenu { contextMenuContent }
     }
 

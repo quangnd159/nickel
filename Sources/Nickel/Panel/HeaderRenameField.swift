@@ -24,6 +24,7 @@ struct HeaderRenameField: NSViewRepresentable {
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 11, weight: .semibold)
+        field.textColor = .secondaryLabelColor
         field.stringValue = text
         field.lineBreakMode = .byTruncatingTail
 

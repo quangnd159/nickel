@@ -49,7 +49,7 @@ struct PanelView: View {
                 Color(nsColor: .windowBackgroundColor).opacity(0.62)
             }
             .contentShape(Rectangle())
-            .onTapGesture { selection.clear() }
+            .onTapGesture { handleBackgroundClick() }
 
             VStack(spacing: 0) {
                 topBar
@@ -148,41 +148,39 @@ struct PanelView: View {
     }
 
     private var noteList: some View {
-        ScrollView {
-            ZStack(alignment: .top) {
-                Color.clear
-                    .contentShape(Rectangle())
-                    .onTapGesture { selection.clear() }
+        GeometryReader { geometry in
+            ScrollView {
+                ZStack(alignment: .top) {
+                    Color.clear
+                        .contentShape(Rectangle())
+                        .onTapGesture { handleBackgroundClick() }
 
-                LazyVStack(alignment: .leading, spacing: 10) {
-                    ForEach(ungroupedNotes) { note in
-                        NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                            .transition(rowTransition)
-                    }
-
-                    ForEach(store.listNames, id: \.self) { listName in
-                        let items = notes(in: listName)
-                        if !items.isEmpty {
-                            sectionHeader(listName)
-                                .padding(.top, 12)
+                    LazyVStack(alignment: .leading, spacing: 10) {
+                        ForEach(ungroupedNotes) { note in
+                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                 .transition(rowTransition)
+                        }
 
-                            ForEach(items) { note in
-                                NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                        ForEach(store.listNames, id: \.self) { listName in
+                            let items = notes(in: listName)
+                            if !items.isEmpty {
+                                sectionHeader(listName)
+                                    .padding(.top, 12)
                                     .transition(rowTransition)
+
+                                ForEach(items) { note in
+                                    NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                        .transition(rowTransition)
+                                }
                             }
                         }
                     }
+                    .animation(rowSpring, value: flatVisibleIDs)
                 }
-                .animation(rowSpring, value: flatVisibleIDs)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .background(
-            Color.clear
-                .contentShape(Rectangle())
-                .onTapGesture { selection.clear() }
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     /// Gentle spring used for note insert/delete/move and section
@@ -201,16 +199,33 @@ struct PanelView: View {
 
         return HStack(spacing: 8) {
             if isRenaming {
-                HeaderRenameField(
-                    text: Binding(
-                        get: { selection.renameText },
-                        set: { selection.renameText = $0 }
-                    ),
-                    onCommit: { commitHeaderRename(from: listName) },
-                    onCancel: { selection.endRenamingList() }
+                ZStack(alignment: .leading) {
+                    // Invisible sizing text: makes the ZStack's width track
+                    // the live edit buffer, so the field auto-grows/shrinks
+                    // with typing instead of sitting at a fixed width.
+                    Text(selection.renameText.isEmpty ? " " : selection.renameText)
+                        .font(.system(size: 11, weight: .semibold))
+                        .opacity(0)
+                        .fixedSize()
+
+                    HeaderRenameField(
+                        text: Binding(
+                            get: { selection.renameText },
+                            set: { selection.renameText = $0 }
+                        ),
+                        onCommit: { commitHeaderRename(from: listName) },
+                        onCancel: { selection.endRenamingList() }
+                    )
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(maxWidth: .infinity)
+                }
+                .frame(minWidth: 60, maxWidth: 240, alignment: .leading)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
                 )
-                .font(.system(size: 11, weight: .semibold))
-                .frame(minWidth: 140, maxWidth: 240, alignment: .leading)
             } else {
                 Text(listName.uppercased())
                     .font(.system(size: 11, weight: .semibold))
@@ -229,6 +244,14 @@ struct PanelView: View {
             Button("Rename List") { selection.beginRenamingList(listName) }
             Button("Dissolve List") { dissolveList(listName) }
         }
+    }
+
+    /// Shared empty-area click handler: resigns first responder (which
+    /// commits any in-progress header rename or note edit, Finder-style, via
+    /// their `textDidEndEditing` paths) then clears the selection.
+    private func handleBackgroundClick() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        selection.clear()
     }
 
     private func commitHeaderRename(from oldName: String) {
