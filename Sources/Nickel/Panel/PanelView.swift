@@ -38,11 +38,22 @@ struct PanelView: View {
 
     var body: some View {
         ZStack {
-            VisualEffectBackground(material: .hudWindow)
+            ZStack {
+                VisualEffectBackground(material: .popover)
+
+                // Mutes wallpaper bleed from the effect view above: a
+                // near-solid gray wash so the panel reads as a soft, opaque
+                // surface (Copper's look) rather than a translucent HUD,
+                // while still adapting to dark mode via
+                // `.windowBackgroundColor`.
+                Color(nsColor: .windowBackgroundColor).opacity(0.62)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { selection.clear() }
 
             VStack(spacing: 0) {
                 topBar
-                    .padding(.bottom, 10)
+                    .padding(.bottom, 12)
 
                 if store.notes.isEmpty && ui.searchText.isEmpty {
                     emptyState
@@ -73,11 +84,11 @@ struct PanelView: View {
                 SearchField(text: $ui.searchText, onEscape: handleSearchEscape)
                     .font(.system(size: 13))
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(.quaternary)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.5))
             )
 
             Menu {
@@ -143,7 +154,7 @@ struct PanelView: View {
                     .contentShape(Rectangle())
                     .onTapGesture { selection.clear() }
 
-                LazyVStack(alignment: .leading, spacing: 8) {
+                LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(ungroupedNotes) { note in
                         NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                             .transition(rowTransition)
@@ -166,6 +177,11 @@ struct PanelView: View {
                 .animation(rowSpring, value: flatVisibleIDs)
             }
         }
+        .background(
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture { selection.clear() }
+        )
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
@@ -184,11 +200,12 @@ struct PanelView: View {
         HStack(spacing: 8) {
             Text(title.uppercased())
                 .font(.system(size: 11, weight: .semibold))
+                .tracking(0.8)
                 .foregroundStyle(.secondary)
                 .fixedSize()
 
             Rectangle()
-                .fill(.tertiary)
+                .fill(.quaternary)
                 .frame(height: 1)
         }
     }
@@ -211,21 +228,22 @@ struct PanelView: View {
     // MARK: - Composer
 
     private var composer: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             Image(systemName: "circle")
-                .font(.system(size: 18))
-                .foregroundStyle(.tertiary)
-                .padding(.top, 1)
+                .font(.system(size: 19, weight: .light))
+                .foregroundStyle(.quaternary)
+                .frame(height: 19)
 
             TextField("Add a note or a prompt", text: $ui.composerText, axis: .vertical)
                 .textFieldStyle(.plain)
-                .font(.system(size: 13))
+                .font(.system(size: 14))
                 .lineLimit(1...5)
                 .onSubmit(commitComposer)
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
         )
     }

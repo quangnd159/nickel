@@ -32,6 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         HotkeyMonitor.shared.onDoubleShift = { [weak self] in self?.handleDoubleShift() }
         startHotkeyMonitorOrPromptForAccess()
+
+        // Dev/test override: NICKEL_SHOW_PANEL=1 opens the panel immediately
+        // at launch, so it can be screenshotted without Accessibility access.
+        if ProcessInfo.processInfo.environment["NICKEL_SHOW_PANEL"] == "1" {
+            panel.toggle()
+        }
     }
 
     private func startHotkeyMonitorOrPromptForAccess() {

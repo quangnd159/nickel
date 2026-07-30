@@ -36,7 +36,10 @@ final class NoteStore: ObservableObject {
     private var lastCapturedAt: Date?
 
     init(fileURL: URL? = nil) {
-        self.fileURL = fileURL ?? Self.defaultFileURL()
+        // Dev/test override: NICKEL_STORE_PATH points the store at an
+        // alternate JSON file instead of the real Application Support one.
+        let envOverride = ProcessInfo.processInfo.environment["NICKEL_STORE_PATH"].map { URL(fileURLWithPath: $0) }
+        self.fileURL = fileURL ?? envOverride ?? Self.defaultFileURL()
         self.notes = Self.load(from: self.fileURL)
     }
 

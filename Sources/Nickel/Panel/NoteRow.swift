@@ -17,14 +17,14 @@ struct NoteRow: View {
     private var isEditing: Bool { selection.editingID == note.id }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
             Button(action: onToggleDone) {
                 Image(systemName: note.isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 18))
-                    .foregroundStyle(note.isDone ? .secondary : .tertiary)
+                    .font(.system(size: 19, weight: .light))
+                    .foregroundStyle(note.isDone ? .secondary : .quaternary)
+                    .frame(height: 19)
             }
             .buttonStyle(.plain)
-            .padding(.top, 1)
 
             if isEditing {
                 InlineTextEditor(
@@ -35,11 +35,12 @@ struct NoteRow: View {
                     onCommit: commitEdit,
                     onCancel: { selection.endEditing() }
                 )
-                .font(.system(size: 13))
+                .font(.system(size: 14))
                 .frame(minHeight: 18)
             } else {
                 Text(renderedText)
-                    .font(.system(size: 13))
+                    .font(.system(size: 14))
+                    .lineSpacing(2)
                     .foregroundStyle(.primary)
                     .lineLimit(3)
                     .truncationMode(.tail)
@@ -47,13 +48,14 @@ struct NoteRow: View {
                     .opacity(note.isDone ? 0.5 : 1)
             }
         }
-        .padding(12)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.accentColor, lineWidth: 2)
                 .opacity(isSelected ? 1 : 0)
         )
