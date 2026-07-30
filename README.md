@@ -56,7 +56,7 @@ Xcode installation is needed or used.
 
 ```bash
 swift build                 # compile the SwiftPM executable (debug)
-bash scripts/build-app.sh   # release-build, assemble build/Nickel.app, ad-hoc code-sign it
+bash scripts/build-app.sh   # release-build, assemble build/Nickel.app, code-sign it
 open build/Nickel.app       # launch
 ```
 
@@ -66,15 +66,18 @@ detect the global double-Shift gesture and read the current text selection
 from other apps. Nickel polls for the permission and starts up automatically
 once it's granted — no relaunch needed.
 
-### Ad-hoc signing caveat
+### Signing caveat
 
-`scripts/build-app.sh` code-signs the app ad-hoc (`codesign --sign -`), which
-is enough to run locally but is **not a stable identity**: every time you
-rebuild, macOS treats the app as "new" and will re-prompt for Accessibility
-access (and may show it as already "granted" for a stale entry that no longer
-matches). If double-Shift stops being detected after a rebuild, re-grant
-Accessibility access for Nickel in System Settings. A real Developer ID
-signature would avoid this churn for distributed builds.
+`scripts/build-app.sh` signs with a self-signed "Nickel Dev Signing" identity
+in the login keychain when it's present and trusted, falling back to ad-hoc
+(`codesign --sign -`) otherwise. With the "Nickel Dev Signing" certificate
+installed and trusted, the signature stays stable across rebuilds, so macOS
+keeps recognizing the app as the same one and your Accessibility grant
+survives rebuilds. Under the ad-hoc fallback there's no stable identity:
+every rebuild makes macOS treat the app as "new" and re-prompt for
+Accessibility access (and may show it as already "granted" for a stale entry
+that no longer matches). If double-Shift stops being detected after a
+rebuild, re-grant Accessibility access for Nickel in System Settings.
 
 ## Architecture notes
 

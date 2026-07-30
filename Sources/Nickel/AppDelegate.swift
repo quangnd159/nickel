@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        setupMainMenu()
 
         let panel = FloatingPanel(store: noteStore)
         self.panel = panel
@@ -80,6 +81,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    /// Nickel is `LSUIElement` (no Dock icon, no visible menu bar), but AppKit
+    /// still routes key equivalents (⌘Q, ⌘C/V/X/A, ⌘Z) through the app's main
+    /// menu regardless of whether it's ever shown. Without one, ⌘Q can't quit
+    /// the app and standard text editing shortcuts don't work in the search
+    /// field, composer, or inline note editors. This installs the minimal
+    /// menu needed for that routing to work; it's never visible to the user.
+    private func setupMainMenu() {
+        let mainMenu = NSMenu()
+
+        let appMenuItem = NSMenuItem()
+        let appMenu = NSMenu()
+        appMenu.addItem(
+            NSMenuItem(title: "Quit Nickel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        )
+        appMenuItem.submenu = appMenu
+        mainMenu.addItem(appMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(
+            NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        )
+        editMenu.addItem(
+            withTitle: "Redo",
+            action: Selector(("redo:")),
+            keyEquivalent: "z"
+        ).keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(.separator())
+        editMenu.addItem(
+            NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        )
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
+        NSApp.mainMenu = mainMenu
     }
 
     private func makeMenu() -> NSMenu {

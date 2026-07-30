@@ -15,6 +15,16 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp ".build/release/Nickel" "$APP_BUNDLE/Contents/MacOS/Nickel"
 cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 
-codesign --force --sign - "$APP_BUNDLE"
+IDENTITY="-"
+if security find-identity -p codesigning -v 2>/dev/null | grep -q "Nickel Dev Signing"; then
+  IDENTITY="Nickel Dev Signing"
+fi
+
+if ! codesign --force --sign "$IDENTITY" "$APP_BUNDLE"; then
+  echo "codesign with \"$IDENTITY\" failed; falling back to ad-hoc signing" >&2
+  IDENTITY="-"
+  codesign --force --sign "$IDENTITY" "$APP_BUNDLE"
+fi
+echo "Signed with identity: $IDENTITY"
 
 echo "$ROOT_DIR/$APP_BUNDLE"
