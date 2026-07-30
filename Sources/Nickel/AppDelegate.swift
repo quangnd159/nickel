@@ -34,11 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         HotkeyMonitor.shared.onDoubleShift = { [weak self] in self?.handleDoubleShift() }
         startHotkeyMonitorOrPromptForAccess()
 
-        // Dev/test override: NICKEL_SHOW_PANEL=1 opens the panel immediately
-        // at launch, so it can be screenshotted without Accessibility access.
-        if ProcessInfo.processInfo.environment["NICKEL_SHOW_PANEL"] == "1" {
-            panel.toggle()
-        }
+        panel.toggle()
     }
 
     private func startHotkeyMonitorOrPromptForAccess() {
@@ -69,9 +65,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The panel is a nonactivating NSPanel, so it can be key without
         // being the frontmost app; while it's key the user is interacting
         // with it (selecting notes, renaming a list, typing), so
-        // double-shift must be a no-op.
+        // double-shift dismisses it instead of triggering a new capture
+        // (in-progress edits commit via the existing focus-loss paths).
         if panel?.isKeyWindow == true {
-            debugLog("handleDoubleShift: ignored, panel is key window")
+            debugLog("handleDoubleShift: panel is key window, hiding it")
+            panel?.toggle()
             return
         }
         guard !isCapturing else { return }
