@@ -26,27 +26,37 @@ struct NoteRow: View {
             }
             .buttonStyle(.plain)
 
-            if isEditing {
-                InlineTextEditor(
-                    text: Binding(
-                        get: { selection.editingText },
-                        set: { selection.editingText = $0 }
-                    ),
-                    onCommit: commitEdit,
-                    onCancel: { selection.endEditing() }
-                )
-                .font(.system(size: 14))
-                .frame(minHeight: 18)
-            } else {
-                Text(renderedText)
+            Group {
+                if isEditing {
+                    InlineTextEditor(
+                        text: Binding(
+                            get: { selection.editingText },
+                            set: { selection.editingText = $0 }
+                        ),
+                        onCommit: commitEdit,
+                        onCancel: { selection.endEditing() }
+                    )
                     .font(.system(size: 14))
-                    .lineSpacing(2)
-                    .foregroundStyle(.primary)
-                    .lineLimit(3)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .opacity(note.isDone ? 0.5 : 1)
+                    .frame(minHeight: 18)
+                } else {
+                    Text(renderedText)
+                        .font(.system(size: 14))
+                        .lineSpacing(2)
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .opacity(note.isDone ? 0.5 : 1)
+                }
             }
+            // Row-level click/double-click gestures live on this column only
+            // (not the outer HStack), so clicking the checkbox can never
+            // change selection — it's a work-tracking control (Copper's
+            // check-off-as-you-go flow), and must behave like
+            // Reminders/Things, where tapping the circle only toggles done.
+            .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture(count: 1).onEnded(handleSingleClick))
+            .simultaneousGesture(TapGesture(count: 2).onEnded(handleDoubleClick))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
@@ -61,8 +71,6 @@ struct NoteRow: View {
         )
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
         .contentShape(Rectangle())
-        .simultaneousGesture(TapGesture(count: 1).onEnded(handleSingleClick))
-        .simultaneousGesture(TapGesture(count: 2).onEnded(handleDoubleClick))
         .contextMenu { contextMenuContent }
     }
 

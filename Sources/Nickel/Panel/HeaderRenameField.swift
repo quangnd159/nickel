@@ -29,7 +29,18 @@ struct HeaderRenameField: NSViewRepresentable {
 
         DispatchQueue.main.async {
             field.window?.makeFirstResponder(field)
-            field.currentEditor()?.selectAll(nil)
+            if field.currentEditor() != nil {
+                field.currentEditor()?.selectAll(nil)
+            } else {
+                // The field can be created mid-layout-pass (e.g. inside a
+                // ScrollView's LazyVStack), in which case `makeFirstResponder`
+                // above can silently no-op. Retry once on the next runloop
+                // tick, by which point layout has settled.
+                DispatchQueue.main.async {
+                    field.window?.makeFirstResponder(field)
+                    field.currentEditor()?.selectAll(nil)
+                }
+            }
         }
         return field
     }

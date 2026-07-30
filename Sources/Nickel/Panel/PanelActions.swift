@@ -68,10 +68,35 @@ final class PanelActions: ObservableObject {
         selection.selectedIDs = mergedID.map { [$0] } ?? []
     }
 
+    /// Deletes the current selection, then selects the nearest surviving
+    /// note (standard `NSTableView` behavior): the note that followed the
+    /// last deleted note in the pre-delete visible order, or (if none
+    /// follows) the note that preceded the first deleted one, or (if the
+    /// list is now empty) nothing.
     func delete() {
         guard !selection.selectedIDs.isEmpty else { return }
+        let order = selection.visibleOrder
+        let deletedIndices = order.indices.filter { selection.selectedIDs.contains(order[$0]) }
+        let lastDeletedIndex = deletedIndices.max()
+        let firstDeletedIndex = deletedIndices.min()
+
         store.delete(ids: selection.selectedIDs)
-        selection.clear()
+
+        let survivors = order.filter { !selection.selectedIDs.contains($0) }
+        var nextSelectionID: UUID?
+        if let lastDeletedIndex {
+            if let after = order[(lastDeletedIndex + 1)...].first(where: { survivors.contains($0) }) {
+                nextSelectionID = after
+            } else if let firstDeletedIndex {
+                nextSelectionID = order[..<firstDeletedIndex].last { survivors.contains($0) }
+            }
+        }
+
+        if let nextSelectionID {
+            selection.selectSingle(nextSelectionID)
+        } else {
+            selection.clear()
+        }
     }
 
     // MARK: - Move to list
@@ -89,7 +114,7 @@ final class PanelActions: ObservableObject {
         guard !selection.selectedIDs.isEmpty else { return }
         let name = store.uniqueProvisionalListName()
         store.move(ids: selection.selectedIDs, toList: name)
-        selection.renamingListName = name
+        selection.beginRenamingList(name)
     }
 
     // MARK: - Right-click

@@ -28,12 +28,6 @@ struct VisualEffectBackground: NSViewRepresentable {
 final class PanelUIState: ObservableObject {
     @Published var searchText = ""
     @Published var composerText = ""
-
-    /// Live edit buffer for whichever section header is currently in inline
-    /// rename mode (see `SelectionModel.renamingListName`), kept here rather
-    /// than in `SelectionModel` since it's pure ephemeral UI state local to
-    /// this view.
-    @Published var headerRenameText = ""
 }
 
 struct PanelView: View {
@@ -76,9 +70,6 @@ struct PanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onAppear { selection.updateVisibleOrder(flatVisibleIDs) }
         .onChange(of: flatVisibleIDs) { _, newValue in selection.updateVisibleOrder(newValue) }
-        .onChange(of: selection.renamingListName) { _, newValue in
-            if let newValue { ui.headerRenameText = newValue }
-        }
     }
 
     // MARK: - Top bar
@@ -212,14 +203,14 @@ struct PanelView: View {
             if isRenaming {
                 HeaderRenameField(
                     text: Binding(
-                        get: { ui.headerRenameText },
-                        set: { ui.headerRenameText = $0 }
+                        get: { selection.renameText },
+                        set: { selection.renameText = $0 }
                     ),
                     onCommit: { commitHeaderRename(from: listName) },
-                    onCancel: { selection.renamingListName = nil }
+                    onCancel: { selection.endRenamingList() }
                 )
                 .font(.system(size: 11, weight: .semibold))
-                .fixedSize()
+                .frame(minWidth: 140, maxWidth: 240, alignment: .leading)
             } else {
                 Text(listName.uppercased())
                     .font(.system(size: 11, weight: .semibold))
@@ -227,7 +218,7 @@ struct PanelView: View {
                     .foregroundStyle(.secondary)
                     .fixedSize()
                     .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { beginRenamingList(listName) }
+                    .onTapGesture(count: 2) { selection.beginRenamingList(listName) }
             }
 
             Rectangle()
@@ -235,19 +226,14 @@ struct PanelView: View {
                 .frame(height: 1)
         }
         .contextMenu {
-            Button("Rename List") { beginRenamingList(listName) }
+            Button("Rename List") { selection.beginRenamingList(listName) }
             Button("Dissolve List") { dissolveList(listName) }
         }
     }
 
-    private func beginRenamingList(_ listName: String) {
-        ui.headerRenameText = listName
-        selection.renamingListName = listName
-    }
-
     private func commitHeaderRename(from oldName: String) {
-        store.renameList(from: oldName, to: ui.headerRenameText)
-        selection.renamingListName = nil
+        store.renameList(from: oldName, to: selection.renameText)
+        selection.endRenamingList()
     }
 
     /// Notes survive; the list grouping disappears (all matching notes'

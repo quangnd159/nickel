@@ -202,6 +202,15 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         toggle()
     }
 
+    /// Backs the Edit menu's Select All (⌘A) when the panel itself is first
+    /// responder (i.e. no text field has focus, in which case its field
+    /// editor handles ⌘A as "select all text" instead — the menu item
+    /// targets whatever's first responder, so no key-equivalent routing is
+    /// needed here).
+    override func selectAll(_ sender: Any?) {
+        selectionModel.selectAllNotes()
+    }
+
     // MARK: - Keyboard shortcuts
 
     /// Handles the panel's interaction-layer shortcuts (⌘C, ⇧⌘C, Space,

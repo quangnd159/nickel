@@ -18,6 +18,13 @@ final class SelectionModel: ObservableObject {
     /// `PanelView`).
     @Published var renamingListName: String?
 
+    /// Live edit buffer for whichever section header is currently in inline
+    /// rename mode. Set together with `renamingListName` by
+    /// `beginRenamingList(_:)` so the two are never observed out of sync
+    /// (avoids a one-frame window where `HeaderRenameField` is created bound
+    /// to an empty string before a separate sync pass fills it in).
+    @Published var renameText: String = ""
+
     /// The panel's current flat, filtered, visible order of note IDs
     /// (ungrouped notes first, then each list's notes, in display order).
     /// Kept in sync by `PanelView` whenever the underlying/filtered note list
@@ -98,7 +105,7 @@ final class SelectionModel: ObservableObject {
 
         guard let referenceID = anchorID ?? selectedIDs.first,
               let currentIndex = visibleOrder.firstIndex(of: referenceID) else {
-            selectSingle(visibleOrder[0])
+            selectSingle(direction < 0 ? visibleOrder[visibleOrder.count - 1] : visibleOrder[0])
             return
         }
 
@@ -125,5 +132,28 @@ final class SelectionModel: ObservableObject {
     func endEditing() {
         editingID = nil
         editingText = ""
+    }
+
+    // MARK: - List rename
+
+    /// Enters inline rename mode for a section header, seeding the edit
+    /// buffer *before* flipping on `renamingListName` so the field is never
+    /// rendered with stale/empty text.
+    func beginRenamingList(_ name: String) {
+        renameText = name
+        renamingListName = name
+    }
+
+    func endRenamingList() {
+        renamingListName = nil
+        renameText = ""
+    }
+
+    // MARK: - Select all
+
+    func selectAllNotes() {
+        guard !visibleOrder.isEmpty else { return }
+        selectedIDs = Set(visibleOrder)
+        anchorID = visibleOrder.first
     }
 }
