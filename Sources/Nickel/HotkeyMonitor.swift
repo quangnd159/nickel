@@ -21,7 +21,7 @@ final class HotkeyMonitor {
     private init() {}
 
     func start() {
-        guard Permissions.isTrusted, globalMonitor == nil else { return }
+        guard Permissions.isTrusted, Permissions.hasInputMonitoring, globalMonitor == nil else { return }
 
         globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak self] event in
             self?.handle(event)
@@ -30,6 +30,11 @@ final class HotkeyMonitor {
             self?.handle(event)
             return event
         }
+
+        debugLog(
+            "HotkeyMonitor.start: isTrusted=\(Permissions.isTrusted) " +
+            "hasInputMonitoring=\(Permissions.hasInputMonitoring); monitors installed"
+        )
     }
 
     func stop() {
@@ -94,9 +99,11 @@ final class HotkeyMonitor {
         let now = Date()
         if let lastTapDate, now.timeIntervalSince(lastTapDate) <= Self.maxTapInterval {
             self.lastTapDate = nil
+            debugLog("tap 2 -> fire")
             onDoubleShift?()
         } else {
             lastTapDate = now
+            debugLog("tap 1")
         }
     }
 }

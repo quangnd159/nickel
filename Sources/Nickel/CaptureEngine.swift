@@ -17,10 +17,14 @@ enum CaptureEngine {
         }
 
         if let text = captureViaAccessibility(), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            debugLog("CaptureEngine: AX path, length=\(trimmed.count)")
+            return trimmed
         }
 
-        return captureViaPasteboard()
+        let text = captureViaPasteboard()
+        debugLog("CaptureEngine: pasteboard path, length=\(text.map { String($0.count) } ?? "nil")")
+        return text
     }
 
     private static func captureViaAccessibility() -> String? {

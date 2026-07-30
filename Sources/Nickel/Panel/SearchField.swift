@@ -1,6 +1,13 @@
 import SwiftUI
 import AppKit
 
+/// Posted by `FloatingPanel` when ⌘F is pressed, so `SearchField` can focus
+/// its field editor even though the panel deliberately opens with no first
+/// responder (see `FloatingPanel.animateShow`).
+extension Notification.Name {
+    static let nickelFocusSearch = Notification.Name("NickelFocusSearch")
+}
+
 /// A borderless, single-line `NSTextField` used for the panel's search box.
 ///
 /// Backed by `NSViewRepresentable` (like `InlineTextEditor`) rather than
@@ -32,6 +39,7 @@ struct SearchField: NSViewRepresentable {
         )
         field.stringValue = text
         field.lineBreakMode = .byTruncatingTail
+        context.coordinator.field = field
         return field
     }
 
@@ -49,10 +57,27 @@ struct SearchField: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextFieldDelegate {
         private let text: Binding<String>
         var onEscape: () -> Void
+        weak var field: NSTextField?
 
         init(text: Binding<String>, onEscape: @escaping () -> Void) {
             self.text = text
             self.onEscape = onEscape
+            super.init()
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(focusSearch),
+                name: .nickelFocusSearch,
+                object: nil
+            )
+        }
+
+        deinit {
+            NotificationCenter.default.removeObserver(self)
+        }
+
+        @objc private func focusSearch() {
+            guard let field else { return }
+            field.window?.makeFirstResponder(field)
         }
 
         func controlTextDidChange(_ notification: Notification) {

@@ -160,6 +160,11 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         setFrame(startFrame, display: false)
         alphaValue = 0
         makeKeyAndOrderFront(nil)
+        // AppKit auto-assigns first responder to the first key-view (the
+        // search field) when the panel becomes key. Clear it so the panel
+        // opens with no text focus and note shortcuts (⌘C, Space, etc.) work
+        // immediately; clicking the search field still focuses it normally.
+        makeFirstResponder(nil)
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.toggleAnimationDuration
@@ -254,6 +259,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         let characters = event.charactersIgnoringModifiers?.lowercased()
         if modifiers == [.command], characters == "c" {
             actions.copy()
+            return true
+        }
+        if modifiers == [.command], characters == "f" {
+            NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
             return true
         }
         if modifiers == [.command, .shift] {
