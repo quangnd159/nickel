@@ -36,11 +36,20 @@ final class SelectionModel: ObservableObject {
     /// shift-click and shift-arrow range selection.
     private var anchorID: UUID?
 
+    /// The moving end of the current range selection (the last note reached
+    /// by shift-arrow or shift-click). Arrow keys step from here, not from
+    /// the anchor — otherwise repeated shift-arrows could never grow the
+    /// range past the anchor's immediate neighbor.
+    private var leadID: UUID?
+
     func updateVisibleOrder(_ order: [UUID]) {
         visibleOrder = order
         selectedIDs = selectedIDs.intersection(order)
         if let anchorID, !order.contains(anchorID) {
             self.anchorID = nil
+        }
+        if let leadID, !order.contains(leadID) {
+            self.leadID = nil
         }
         if let editingID, !order.contains(editingID) {
             endEditing()
@@ -68,6 +77,7 @@ final class SelectionModel: ObservableObject {
     func selectSingle(_ id: UUID) {
         selectedIDs = [id]
         anchorID = id
+        leadID = id
     }
 
     func toggle(_ id: UUID) {
@@ -77,6 +87,7 @@ final class SelectionModel: ObservableObject {
             selectedIDs.insert(id)
         }
         anchorID = id
+        leadID = id
     }
 
     private func extendRange(to id: UUID) {
@@ -89,12 +100,14 @@ final class SelectionModel: ObservableObject {
         let range = anchorIndex <= targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
         selectedIDs = Set(visibleOrder[range])
         // Anchor stays put so further shift-clicks keep extending from the same origin.
+        leadID = id
     }
 
     /// Click on empty space: clears the selection.
     func clear() {
         selectedIDs = []
         anchorID = nil
+        leadID = nil
     }
 
     // MARK: - Keyboard navigation
@@ -104,7 +117,7 @@ final class SelectionModel: ObservableObject {
     func moveSelection(direction: Int, extend: Bool) {
         guard !visibleOrder.isEmpty else { return }
 
-        guard let referenceID = anchorID ?? selectedIDs.first,
+        guard let referenceID = leadID ?? anchorID ?? selectedIDs.first,
               let currentIndex = visibleOrder.firstIndex(of: referenceID) else {
             selectSingle(direction < 0 ? visibleOrder[visibleOrder.count - 1] : visibleOrder[0])
             return
@@ -170,5 +183,6 @@ final class SelectionModel: ObservableObject {
         guard !visibleOrder.isEmpty else { return }
         selectedIDs = Set(visibleOrder)
         anchorID = visibleOrder.first
+        leadID = visibleOrder.last
     }
 }
