@@ -91,7 +91,11 @@ final class PanelActions: ObservableObject {
         guard selection.selectedIDs.count >= 2 else { return }
         let mergedID = selectedNotes.min(by: { $0.createdAt < $1.createdAt })?.id
         store.merge(ids: selection.selectedIDs)
-        selection.selectedIDs = mergedID.map { [$0] } ?? []
+        if let mergedID {
+            selection.selectSingle(mergedID)
+        } else {
+            selection.clear()
+        }
     }
 
     /// Deletes the current selection, then selects the nearest surviving
