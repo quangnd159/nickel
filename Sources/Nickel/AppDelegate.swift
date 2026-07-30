@@ -66,6 +66,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleDoubleShift() {
+        // The panel is a nonactivating NSPanel, so it can be key without
+        // being the frontmost app; while it's key the user is interacting
+        // with it (selecting notes, renaming a list, typing), so
+        // double-shift must be a no-op.
+        if panel?.isKeyWindow == true {
+            debugLog("handleDoubleShift: ignored, panel is key window")
+            return
+        }
         guard !isCapturing else { return }
         isCapturing = true
 
