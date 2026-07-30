@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 final class FloatingPanel: NSPanel {
-    convenience init() {
+    convenience init(store: CapturedStore) {
         let size = NSSize(width: 360, height: 560)
         self.init(
             contentRect: NSRect(origin: .zero, size: size),
@@ -19,7 +19,7 @@ final class FloatingPanel: NSPanel {
         isOpaque = false
         hasShadow = true
 
-        contentView = NSHostingView(rootView: PanelView())
+        contentView = NSHostingView(rootView: PanelView().environmentObject(store))
 
         positionNearTopRight()
     }
