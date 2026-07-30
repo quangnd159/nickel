@@ -101,11 +101,12 @@ struct InlineTextEditor: NSViewRepresentable {
             .font: font,
             .foregroundColor: NSColor.labelColor
         ]
-        if let textStorage = editor.textStorage {
-            let fullRange = NSRange(location: 0, length: textStorage.length)
-            textStorage.addAttribute(.paragraphStyle, value: style, range: fullRange)
-            textStorage.addAttribute(.font, value: font, range: fullRange)
-        }
+        guard let textStorage = editor.textStorage, textStorage.length > 0 else { return }
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        textStorage.beginEditing()
+        textStorage.addAttribute(.paragraphStyle, value: style, range: fullRange)
+        textStorage.addAttribute(.font, value: font, range: fullRange)
+        textStorage.endEditing()
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
@@ -113,6 +114,10 @@ struct InlineTextEditor: NSViewRepresentable {
         private let onCommit: () -> Void
         private let onCancel: () -> Void
         private var didFinish = false
+        /// Guards against re-entering `pinFixedLineHeight` from within itself:
+        /// it edits `textStorage`, which could in principle re-post the
+        /// control's text-changed notification before this call returns.
+        private var isRestampingLineHeight = false
 
         init(text: Binding<String>, onCommit: @escaping () -> Void, onCancel: @escaping () -> Void) {
             self.text = text
@@ -129,10 +134,21 @@ struct InlineTextEditor: NSViewRepresentable {
             InlineTextEditor.pinFixedLineHeight(in: editor)
         }
 
+        /// Re-stamps the fixed line height on every keystroke. Typing at the
+        /// very start of the field editor's text can otherwise drop the
+        /// paragraph style's line-height info for that line (a documented
+        /// `NSTextView` quirk), so this cheaply re-applies it over the full
+        /// (note-sized) text on each change rather than trying to special-case
+        /// just the first line.
         func controlTextDidChange(_ notification: Notification) {
             guard let field = notification.object as? NSTextField else { return }
             text.wrappedValue = field.stringValue
             field.invalidateIntrinsicContentSize()
+
+            guard !isRestampingLineHeight, let editor = field.currentEditor() as? NSTextView else { return }
+            isRestampingLineHeight = true
+            InlineTextEditor.pinFixedLineHeight(in: editor)
+            isRestampingLineHeight = false
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
