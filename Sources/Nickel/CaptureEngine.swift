@@ -64,13 +64,31 @@ enum CaptureEngine {
             Thread.sleep(forTimeInterval: 0.03)
         }
 
-        let captured = changed ? pasteboard.string(forType: .string) : nil
+        let captured = changed ? markdown(from: pasteboard) ?? pasteboard.string(forType: .string) : nil
         restore(snapshot, to: pasteboard)
 
         guard let text = captured?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             return nil
         }
         return text
+    }
+
+    /// Prefers a rich pasteboard flavor (HTML, then RTF) converted to
+    /// Markdown, so bold/italic/links/lists/etc. survive the capture. Falls
+    /// back to nil (letting the caller use the plain-text flavor) when
+    /// neither flavor is present or conversion yields nothing.
+    private static func markdown(from pasteboard: NSPasteboard) -> String? {
+        if let data = pasteboard.data(forType: .html),
+           let markdown = MarkdownConverter.markdown(fromHTML: data),
+           !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return markdown
+        }
+        if let data = pasteboard.data(forType: .rtf),
+           let markdown = MarkdownConverter.markdown(fromRTF: data),
+           !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return markdown
+        }
+        return nil
     }
 
     private static func snapshotItems(of pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {

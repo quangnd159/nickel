@@ -1,15 +1,15 @@
 import AppKit
-import SwiftUI
 
 /// A borderless, non-activating panel that can never become key or main.
 ///
-/// A long-lived, reused `NSPanel` accumulates AppKit-internal state (remote-view
-/// observers, order-on-screen notification wiring, etc.) the longer it stays alive.
-/// Under some conditions re-ordering that same window back on screen has been
-/// observed to raise an uncaught ObjC exception deep in AppKit
-/// (`-[NSRemoteView containingWindowWillOrderOnScreen:]`) which aborts the process.
-/// To avoid depending on that window's history at all, every `CaptureHUD.show()`
-/// call creates a brand new instance of this panel and tears it down when done.
+/// The crash this used to work around (`-[NSRemoteView containingWindowWillOrderOnScreen:]`
+/// aborting on `orderFrontRegardless()`) traced back to `NSHostingView`: hosting SwiftUI
+/// content spins up a ViewBridge remote view whose order-on-screen observer could throw.
+/// Recreating this panel per-toast didn't help because the SwiftUI content view was
+/// recreated right along with it. The real fix is below: the HUD's content is now plain
+/// AppKit (see `HUDContentView`), so this window never hosts a remote view at all. The
+/// panel is still recreated per call, which is cheap and keeps its lifetime tightly
+/// scoped to a single toast.
 private final class HUDPanel: NSPanel {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
@@ -111,7 +111,7 @@ private final class HUDInstance {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
-        panel.contentView = NSHostingView(rootView: CaptureHUDView())
+        panel.contentView = HUDContentView()
         position(panel)
         return panel
     }
@@ -128,16 +128,52 @@ private final class HUDInstance {
     }
 }
 
-private struct CaptureHUDView: View {
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
-            Text("Captured")
-                .font(.system(size: 13, weight: .medium))
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
-        .background(VisualEffectBackground(material: .hudWindow))
-        .clipShape(Capsule())
+/// Plain-AppKit "Captured" capsule: a blurred backing, a checkmark glyph, and a label.
+/// Deliberately contains no SwiftUI (no `NSHostingView`) so the HUD window can't host a
+/// ViewBridge remote view — see the note on `HUDPanel` above.
+private final class HUDContentView: NSView {
+    init() {
+        super.init(frame: .zero)
+
+        let blur = NSVisualEffectView()
+        blur.material = .hudWindow
+        blur.blendingMode = .behindWindow
+        blur.state = .active
+        blur.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(blur)
+
+        let icon = NSImageView()
+        icon.image = NSImage(systemSymbolName: "checkmark.circle.fill", accessibilityDescription: nil)
+        icon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(icon)
+
+        let label = NSTextField(labelWithString: "Captured")
+        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            blur.leadingAnchor.constraint(equalTo: leadingAnchor),
+            blur.trailingAnchor.constraint(equalTo: trailingAnchor),
+            blur.topAnchor.constraint(equalTo: topAnchor),
+            blur.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func layout() {
+        super.layout()
+        wantsLayer = true
+        layer?.cornerRadius = bounds.height / 2
+        layer?.masksToBounds = true
     }
 }

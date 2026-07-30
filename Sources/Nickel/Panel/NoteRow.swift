@@ -100,15 +100,30 @@ struct NoteRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    private var isExpanded: Bool { selection.expandedIDs.contains(note.id) }
+
+    @ViewBuilder
     private var displayText: some View {
-        Text(renderedText)
-            .font(.system(size: 14))
-            .lineSpacing(2)
-            .foregroundStyle(.primary)
-            .lineLimit(selection.expandedIDs.contains(note.id) ? nil : 3)
-            .truncationMode(.tail)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .opacity(note.isDone ? 0.5 : 1)
+        if isExpanded {
+            // Full Markdown rendering: headings, lists, blockquotes and code
+            // blocks get their own block styling; nothing is line-clamped.
+            MarkdownBlocksView(text: note.text)
+                .foregroundStyle(.primary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(note.isDone ? 0.5 : 1)
+        } else {
+            // Collapsed 3-line preview: flattened to plain lines (block
+            // markers like "#"/"-"/">" stripped) with inline styling still
+            // applied, so the clamp behaves like simple wrapped text.
+            Text(renderedText)
+                .font(.system(size: 14))
+                .lineSpacing(2)
+                .foregroundStyle(.primary)
+                .lineLimit(3)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .opacity(note.isDone ? 0.5 : 1)
+        }
     }
 
     // MARK: - Click handling
@@ -200,15 +215,20 @@ struct NoteRow: View {
         return .handled
     }
 
-    /// Builds the display string via inline markdown parsing
-    /// (`AttributedString(markdown:, options:
-    /// .inlineOnlyPreservingWhitespace)`), with a plain-text fallback for
-    /// unparseable input.
+    /// Collapsed preview text: block markers (heading `#`, list `-`/`1.`,
+    /// blockquote `>`) are stripped so the 3-line clamp reads as plain
+    /// wrapped text, while inline styling (bold/italic/links/code) still
+    /// renders via `AttributedString(markdown:, options:
+    /// .inlineOnlyPreservingWhitespace)`. Falls back to plain text if that
+    /// fails to parse.
     private var renderedText: AttributedString {
+        let flattened = MarkdownBlock.parse(note.text)
+            .map(\.plainText)
+            .joined(separator: "\n")
         let options = AttributedString.MarkdownParsingOptions(
             interpretedSyntax: .inlineOnlyPreservingWhitespace
         )
-        return (try? AttributedString(markdown: note.text, options: options)) ?? AttributedString(note.text)
+        return (try? AttributedString(markdown: flattened, options: options)) ?? AttributedString(flattened)
     }
 
     // MARK: - Context menu
