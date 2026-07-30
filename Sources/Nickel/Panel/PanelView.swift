@@ -31,6 +31,8 @@ final class PanelUIState: ObservableObject {
 
 struct PanelView: View {
     @EnvironmentObject private var store: NoteStore
+    @EnvironmentObject private var selection: SelectionModel
+    @EnvironmentObject private var actions: PanelActions
     @StateObject private var ui = PanelUIState()
 
     var body: some View {
@@ -54,6 +56,8 @@ struct PanelView: View {
             .padding(16)
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onAppear { selection.updateVisibleOrder(flatVisibleIDs) }
+        .onChange(of: flatVisibleIDs) { _, newValue in selection.updateVisibleOrder(newValue) }
     }
 
     // MARK: - Top bar
@@ -77,6 +81,12 @@ struct PanelView: View {
             )
 
             Menu {
+                Button("Copy All as List") {
+                    actions.copyAllAsList()
+                }
+
+                Divider()
+
                 Button("Quit Nickel") {
                     NSApplication.shared.terminate(nil)
                 }
@@ -107,21 +117,38 @@ struct PanelView: View {
         filteredNotes.filter { $0.listName == listName }
     }
 
+    /// The flat, filtered, visible order of note IDs (ungrouped first, then
+    /// each list's notes), matching `noteList`'s display order exactly.
+    /// `SelectionModel` uses this for range selection and arrow-key nav.
+    private var flatVisibleIDs: [UUID] {
+        var ids = ungroupedNotes.map(\.id)
+        for listName in store.listNames {
+            ids += notes(in: listName).map(\.id)
+        }
+        return ids
+    }
+
     private var noteList: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
-                ForEach(ungroupedNotes) { note in
-                    NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                }
+            ZStack(alignment: .top) {
+                Color.clear
+                    .contentShape(Rectangle())
+                    .onTapGesture { selection.clear() }
 
-                ForEach(store.listNames, id: \.self) { listName in
-                    let items = notes(in: listName)
-                    if !items.isEmpty {
-                        sectionHeader(listName)
-                            .padding(.top, 12)
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(ungroupedNotes) { note in
+                        NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                    }
 
-                        ForEach(items) { note in
-                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                    ForEach(store.listNames, id: \.self) { listName in
+                        let items = notes(in: listName)
+                        if !items.isEmpty {
+                            sectionHeader(listName)
+                                .padding(.top, 12)
+
+                            ForEach(items) { note in
+                                NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                            }
                         }
                     }
                 }
