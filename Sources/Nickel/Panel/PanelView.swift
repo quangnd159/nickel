@@ -28,6 +28,12 @@ struct VisualEffectBackground: NSViewRepresentable {
 final class PanelUIState: ObservableObject {
     @Published var searchText = ""
     @Published var composerText = ""
+
+    /// Live edit buffer for whichever section header is currently in inline
+    /// rename mode (see `SelectionModel.renamingListName`), kept here rather
+    /// than in `SelectionModel` since it's pure ephemeral UI state local to
+    /// this view.
+    @Published var headerRenameText = ""
 }
 
 struct PanelView: View {
@@ -70,6 +76,9 @@ struct PanelView: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onAppear { selection.updateVisibleOrder(flatVisibleIDs) }
         .onChange(of: flatVisibleIDs) { _, newValue in selection.updateVisibleOrder(newValue) }
+        .onChange(of: selection.renamingListName) { _, newValue in
+            if let newValue { ui.headerRenameText = newValue }
+        }
     }
 
     // MARK: - Top bar
@@ -196,18 +205,57 @@ struct PanelView: View {
         .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
     }
 
-    private func sectionHeader(_ title: String) -> some View {
-        HStack(spacing: 8) {
-            Text(title.uppercased())
+    private func sectionHeader(_ listName: String) -> some View {
+        let isRenaming = selection.renamingListName == listName
+
+        return HStack(spacing: 8) {
+            if isRenaming {
+                HeaderRenameField(
+                    text: Binding(
+                        get: { ui.headerRenameText },
+                        set: { ui.headerRenameText = $0 }
+                    ),
+                    onCommit: { commitHeaderRename(from: listName) },
+                    onCancel: { selection.renamingListName = nil }
+                )
                 .font(.system(size: 11, weight: .semibold))
-                .tracking(0.8)
-                .foregroundStyle(.secondary)
                 .fixedSize()
+            } else {
+                Text(listName.uppercased())
+                    .font(.system(size: 11, weight: .semibold))
+                    .tracking(0.8)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) { beginRenamingList(listName) }
+            }
 
             Rectangle()
                 .fill(.quaternary)
                 .frame(height: 1)
         }
+        .contextMenu {
+            Button("Rename List") { beginRenamingList(listName) }
+            Button("Dissolve List") { dissolveList(listName) }
+        }
+    }
+
+    private func beginRenamingList(_ listName: String) {
+        ui.headerRenameText = listName
+        selection.renamingListName = listName
+    }
+
+    private func commitHeaderRename(from oldName: String) {
+        store.renameList(from: oldName, to: ui.headerRenameText)
+        selection.renamingListName = nil
+    }
+
+    /// Notes survive; the list grouping disappears (all matching notes'
+    /// `listName` is cleared). Uses the full (unfiltered) note set so a
+    /// search filter doesn't leave stray notes behind in the dissolved list.
+    private func dissolveList(_ listName: String) {
+        let ids = Set(store.notes.filter { $0.listName == listName }.map(\.id))
+        store.move(ids: ids, toList: nil)
     }
 
     // MARK: - Empty state

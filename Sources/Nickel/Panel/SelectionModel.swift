@@ -12,6 +12,12 @@ final class SelectionModel: ObservableObject {
     @Published var editingID: UUID?
     @Published var editingText: String = ""
 
+    /// The list name currently in inline section-header rename mode, if any
+    /// (set by `PanelActions.createListWithSelection()` for a just-created
+    /// list, or by double-clicking/context-menuing a header in
+    /// `PanelView`).
+    @Published var renamingListName: String?
+
     /// The panel's current flat, filtered, visible order of note IDs
     /// (ungrouped notes first, then each list's notes, in display order).
     /// Kept in sync by `PanelView` whenever the underlying/filtered note list

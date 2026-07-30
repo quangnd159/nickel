@@ -81,29 +81,15 @@ final class PanelActions: ObservableObject {
         store.move(ids: selection.selectedIDs, toList: listName)
     }
 
-    /// Shows a small modal prompt (NSAlert + accessory text field) for a new
-    /// list name, then moves the selection into it. This is the simplest
-    /// reliable way to get a one-line text prompt without SwiftUI `@State`
-    /// driven sheet plumbing.
-    func promptNewList() {
+    /// Creates a new list immediately with a provisional name (Finder's
+    /// "New Folder" pattern), moves the current selection into it, and puts
+    /// its section header into inline rename mode so the user can type over
+    /// the provisional name right away.
+    func createListWithSelection() {
         guard !selection.selectedIDs.isEmpty else { return }
-
-        let alert = NSAlert()
-        alert.messageText = "New List"
-        alert.informativeText = "Enter a name for the new list."
-        alert.addButton(withTitle: "Create")
-        alert.addButton(withTitle: "Cancel")
-
-        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-        textField.placeholderString = "List name"
-        alert.accessoryView = textField
-        alert.window.initialFirstResponder = textField
-
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-
-        let name = textField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        move(toList: name)
+        let name = store.uniqueProvisionalListName()
+        store.move(ids: selection.selectedIDs, toList: name)
+        selection.renamingListName = name
     }
 
     // MARK: - Right-click

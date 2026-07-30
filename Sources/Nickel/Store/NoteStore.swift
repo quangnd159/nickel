@@ -108,6 +108,40 @@ final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Renames every note in list `oldName` to `newName`. If `newName`
+    /// (case-insensitively) matches an already-existing list, the two lists
+    /// merge under that existing list's casing. Trims whitespace; a blank
+    /// result after trimming is a no-op (Finder leaves the name unchanged
+    /// rather than allowing an empty folder name).
+    func renameList(from oldName: String, to newName: String) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != oldName else { return }
+
+        // If an existing (different) list already has this name
+        // case-insensitively, merge into it using its existing casing.
+        let canonicalName = listNames.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame } ?? trimmed
+
+        guard canonicalName != oldName else { return }
+
+        for index in notes.indices where notes[index].listName == oldName {
+            notes[index].listName = canonicalName
+        }
+        scheduleSave()
+    }
+
+    /// A fresh, never-yet-used list name: "New List", "New List 2", "New
+    /// List 3", … (case-insensitive comparison against existing list names).
+    func uniqueProvisionalListName() -> String {
+        let existing = Set(listNames.map { $0.lowercased() })
+        guard existing.contains("new list") else { return "New List" }
+
+        var suffix = 2
+        while existing.contains("new list \(suffix)") {
+            suffix += 1
+        }
+        return "New List \(suffix)"
+    }
+
     /// Joins the text of the given notes (in note order, separated by a blank
     /// line) into the earliest (first-created) note, deleting the others.
     func merge(ids: Set<UUID>) {

@@ -122,7 +122,7 @@ struct NoteRow: View {
             }
             Button("No List") { actions.move(toList: nil) }
             Divider()
-            Button("New List…") { actions.promptNewList() }
+            Button("New List…") { actions.createListWithSelection() }
         }
 
         Divider()
