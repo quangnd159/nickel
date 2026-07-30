@@ -75,6 +75,18 @@ final class PanelActions: ObservableObject {
         selection.beginEditing(id: id, text: note.text)
     }
 
+    /// Commits whatever note is currently mid-edit (if any) and exits edit
+    /// mode. Called before selection-mutating actions (clicking another row,
+    /// clicking the background) so the previously-edited note's text is
+    /// guaranteed saved before that row's `TextField` is torn down — its own
+    /// `.onChange(of: editFocus)` commit can otherwise race a same-tick
+    /// selection change.
+    func commitActiveEditIfAny() {
+        guard let id = selection.editingID else { return }
+        store.update(id: id, text: selection.editingText)
+        selection.endEditing()
+    }
+
     func merge() {
         guard selection.selectedIDs.count >= 2 else { return }
         let mergedID = selectedNotes.min(by: { $0.createdAt < $1.createdAt })?.id

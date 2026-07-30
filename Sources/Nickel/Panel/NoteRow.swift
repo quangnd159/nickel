@@ -5,6 +5,13 @@ import AppKit
 /// styled to match the Copper-style panel (white/dark-gray rounded card,
 /// blue selection outline). Handles click-to-select (with ⌘/⇧ modifiers),
 /// double-click-to-edit, and the note's context menu.
+///
+/// Display and edit both run through SwiftUI's own text engine (`Text` and
+/// `TextField(axis: .vertical)`) at the same 14pt/`.lineSpacing(2)` metrics,
+/// so wrapping and height match by construction — no shared NSTextField
+/// subclass or paragraph-style pinning needed (see the removed `NoteLabel`
+/// and `InlineTextEditor`, which existed only to work around that mismatch
+/// when editing ran through the window's field editor).
 struct NoteRow: View {
     let note: Note
     let onToggleDone: () -> Void
@@ -12,6 +19,7 @@ struct NoteRow: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
+    @FocusState private var editFocus: Bool
 
     private var isSelected: Bool { selection.selectedIDs.contains(note.id) }
     private var isEditing: Bool { selection.editingID == note.id }
@@ -28,22 +36,9 @@ struct NoteRow: View {
 
             Group {
                 if isEditing {
-                    InlineTextEditor(
-                        text: Binding(
-                            get: { selection.editingText },
-                            set: { selection.editingText = $0 }
-                        ),
-                        onCommit: commitEdit,
-                        onCancel: { selection.endEditing() }
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    editField
                 } else {
-                    NoteLabel(
-                        text: note.text,
-                        maximumNumberOfLines: selection.expandedIDs.contains(note.id) ? 0 : 3
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .opacity(note.isDone ? 0.5 : 1)
+                    displayText
                 }
             }
         }
@@ -79,6 +74,46 @@ struct NoteRow: View {
         .contextMenu { contextMenuContent }
     }
 
+    // MARK: - Editing / display subviews
+    //
+    // Split out of `body` (rather than inlined into its `Group`) because the
+    // combined modifier chain otherwise took the type-checker too long to
+    // solve ("the compiler is unable to type-check this expression in
+    // reasonable time"); each computed property type-checks independently.
+
+    private var editingTextBinding: Binding<String> {
+        Binding(
+            get: { selection.editingText },
+            set: { selection.editingText = $0 }
+        )
+    }
+
+    private var editField: some View {
+        TextField("", text: editingTextBinding, axis: .vertical)
+            .textFieldStyle(.plain)
+            .font(.system(size: 14))
+            .lineSpacing(2)
+            .lineLimit(1...)
+            .focused($editFocus)
+            .onAppear(perform: focusEditField)
+            .onChange(of: isEditing, focusEditFieldIfNowEditing)
+            .onChange(of: editFocus, commitOnFocusLoss)
+            .onKeyPress(.return, phases: .down) { (press: KeyPress) in handleReturnKeyPress(press) }
+            .onKeyPress(.escape) { handleEscapeKeyPress() }
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var displayText: some View {
+        Text(renderedText)
+            .font(.system(size: 14))
+            .lineSpacing(2)
+            .foregroundStyle(.primary)
+            .lineLimit(selection.expandedIDs.contains(note.id) ? nil : 3)
+            .truncationMode(.tail)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .opacity(note.isDone ? 0.5 : 1)
+    }
+
     // MARK: - Click handling
 
     // Card horizontal padding (14) + checkbox glyph width (19) + half the
@@ -92,6 +127,13 @@ struct NoteRow: View {
 
     private func handleSingleClick(at location: CGPoint) {
         guard !isInCheckboxColumn(location) else { return }
+        // Clicking another row while this one is mid-edit steals focus,
+        // which fires `editFocus`'s `onChange` and commits — but that's a
+        // separate view instance's state, so it can lose a race against the
+        // selection mutation below if both land in the same tick. Committing
+        // explicitly here first guarantees the previously-edited note's text
+        // is saved before selection moves on.
+        actions.commitActiveEditIfAny()
         guard !isEditing else { return }
         let flags = NSEvent.modifierFlags
         selection.handleClick(on: note.id, shift: flags.contains(.shift), command: flags.contains(.command))
@@ -99,6 +141,7 @@ struct NoteRow: View {
 
     private func handleDoubleClick(at location: CGPoint) {
         guard !isInCheckboxColumn(location) else { return }
+        actions.commitActiveEditIfAny()
         guard !isEditing else { return }
         let flags = NSEvent.modifierFlags
         guard !flags.contains(.command), !flags.contains(.shift) else { return }
@@ -111,8 +154,65 @@ struct NoteRow: View {
     }
 
     private func commitEdit() {
+        guard isEditing else { return }
         store.update(id: note.id, text: selection.editingText)
         selection.endEditing()
+    }
+
+    // MARK: - Inline edit field focus/keys
+    //
+    // Broken out into named methods (rather than inline closures on the
+    // `TextField` modifier chain) because the chain otherwise took the
+    // type-checker too long to solve, per "the compiler is unable to
+    // type-check this expression in reasonable time".
+
+    private func focusEditField() {
+        editFocus = true
+    }
+
+    private func focusEditFieldIfNowEditing(_ old: Bool, _ editing: Bool) {
+        if editing { editFocus = true }
+    }
+
+    /// Click-away commit: fires whenever the field's focus changes, which
+    /// covers losing focus to another control (search field, composer,
+    /// background click) as well as another `NoteRow` stealing focus when
+    /// its own edit begins.
+    private func commitOnFocusLoss(_ old: Bool, _ focused: Bool) {
+        guard !focused, isEditing else { return }
+        commitEdit()
+    }
+
+    /// `TextField(axis: .vertical)` inserts a newline for plain Return by
+    /// default (it only calls `onSubmit` for single-line fields), so Shift
+    /// is not actually needed to get a newline here — but we still want
+    /// plain Return to commit. Returning `.ignored` for Shift+Return lets
+    /// the field's default newline insertion run; returning `.handled` for
+    /// plain Return swallows the keystroke (no newline inserted) and commits
+    /// instead.
+    private func handleReturnKeyPress(_ press: KeyPress) -> KeyPress.Result {
+        if press.modifiers.contains(.shift) {
+            return .ignored
+        }
+        commitEdit()
+        return .handled
+    }
+
+    private func handleEscapeKeyPress() -> KeyPress.Result {
+        selection.endEditing()
+        return .handled
+    }
+
+    /// Builds the display string from the same inline markdown parsing
+    /// `NoteLabel` used pre-migration (and this file used before commit
+    /// cee578a): `AttributedString(markdown:, options:
+    /// .inlineOnlyPreservingWhitespace)`, with a plain-text fallback for
+    /// unparseable input.
+    private var renderedText: AttributedString {
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        return (try? AttributedString(markdown: note.text, options: options)) ?? AttributedString(note.text)
     }
 
     // MARK: - Context menu

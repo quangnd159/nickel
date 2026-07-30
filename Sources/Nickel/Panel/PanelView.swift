@@ -252,10 +252,19 @@ struct PanelView: View {
     }
 
     /// Shared empty-area click handler: resigns first responder (which
-    /// commits any in-progress header rename or note edit, Finder-style, via
-    /// their `textDidEndEditing` paths) then clears the selection.
+    /// commits any in-progress header rename, Finder-style, via its
+    /// `textDidEndEditing` path) then explicitly commits any in-progress note
+    /// edit and clears the selection.
+    ///
+    /// Note edit commit is explicit rather than relying solely on
+    /// `makeFirstResponder(nil)`: the note editor is now a SwiftUI
+    /// `TextField` with `@FocusState`, which AppKit's `makeFirstResponder`
+    /// doesn't reliably resign (SwiftUI manages its own focus state
+    /// independently of the responder chain in some cases), so `NoteRow`'s
+    /// `.onChange(of: editFocus)` commit path isn't guaranteed to fire here.
     private func handleBackgroundClick() {
         NSApp.keyWindow?.makeFirstResponder(nil)
+        actions.commitActiveEditIfAny()
         selection.clear()
     }
 
