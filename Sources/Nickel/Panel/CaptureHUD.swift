@@ -97,9 +97,11 @@ private final class HUDInstance {
     }
 
     private func makePanel(message: String, symbolName: String) -> HUDPanel {
-        let width = HUDContentView.width(forMessage: message)
+        // Let the constraint chain (margin + icon + spacing + label + margin) determine
+        // the capsule's width, so the content is always symmetrically inset.
+        let content = HUDContentView(message: message, symbolName: symbolName)
         let panel = HUDPanel(
-            contentRect: NSRect(origin: .zero, size: NSSize(width: width, height: 40)),
+            contentRect: NSRect(origin: .zero, size: NSSize(width: content.fittingSize.width, height: 40)),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -112,7 +114,7 @@ private final class HUDInstance {
         panel.isReleasedWhenClosed = false
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.hidesOnDeactivate = false
-        panel.contentView = HUDContentView(message: message, symbolName: symbolName)
+        panel.contentView = content
         position(panel)
         return panel
     }
@@ -170,15 +172,6 @@ private final class HUDContentView: NSView {
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    /// Sized to fit the message (icon + margins + text), with a floor matching the
-    /// original fixed-width "Captured" toast so short messages don't look cramped.
-    static func width(forMessage message: String) -> CGFloat {
-        let font = NSFont.systemFont(ofSize: 13, weight: .medium)
-        let textWidth = (message as NSString).size(withAttributes: [.font: font]).width
-        let chrome: CGFloat = 14 + 13 + 6 + 14 // leading margin + icon + spacing + trailing margin
-        return max(140, ceil(textWidth + chrome))
-    }
 
     override func layout() {
         super.layout()
