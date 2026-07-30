@@ -63,29 +63,45 @@ struct NoteRow: View {
         )
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
         // Row-wide click target: clicking anywhere on the card (including its
-        // padding) selects it. Plain (non-simultaneous) `onTapGesture`s here
-        // are exclusive gestures, so the checkbox `Button` — a child control
-        // with its own tap handling — wins hits on itself and this row-level
-        // gesture never fires for it; that keeps the checkbox selection-inert
-        // (a pure work-tracking control, Copper/Reminders/Things-style)
-        // without needing to scope the gesture to the text column only.
-        // `count: 2` is attached before `count: 1` so both fire independently
-        // with no double-click wait delaying the single-click response.
+        // padding) selects it. `simultaneousGesture` (rather than a plain,
+        // exclusive `onTapGesture`) makes the single-click recognizer fire
+        // immediately on mouse-up instead of waiting out the double-click
+        // window for the count:2 recognizer to fail — that wait is what made
+        // click-to-select feel slow. Because simultaneous gestures don't
+        // exclude the checkbox `Button`'s own tap handling, both handlers
+        // explicitly ignore hits that land in the checkbox column (see
+        // `isInCheckboxColumn`) so the checkbox stays selection-inert (a pure
+        // work-tracking control, Copper/Reminders/Things-style).
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) { handleDoubleClick() }
-        .onTapGesture { handleSingleClick() }
+        .simultaneousGesture(
+            SpatialTapGesture(count: 1).onEnded { value in handleSingleClick(at: value.location) }
+        )
+        .simultaneousGesture(
+            SpatialTapGesture(count: 2).onEnded { value in handleDoubleClick(at: value.location) }
+        )
         .contextMenu { contextMenuContent }
     }
 
     // MARK: - Click handling
 
-    private func handleSingleClick() {
+    // Card horizontal padding (14) + checkbox glyph width (19) + half the
+    // HStack's 12pt gap (6) = 39: taps left of this x fall on the checkbox
+    // and belong to its own Button, not row selection.
+    private let checkboxColumnMaxX: CGFloat = 14 + 19 + 12 / 2
+
+    private func isInCheckboxColumn(_ location: CGPoint) -> Bool {
+        location.x < checkboxColumnMaxX
+    }
+
+    private func handleSingleClick(at location: CGPoint) {
+        guard !isInCheckboxColumn(location) else { return }
         guard !isEditing else { return }
         let flags = NSEvent.modifierFlags
         selection.handleClick(on: note.id, shift: flags.contains(.shift), command: flags.contains(.command))
     }
 
-    private func handleDoubleClick() {
+    private func handleDoubleClick(at location: CGPoint) {
+        guard !isInCheckboxColumn(location) else { return }
         guard !isEditing else { return }
         let flags = NSEvent.modifierFlags
         guard !flags.contains(.command), !flags.contains(.shift) else { return }
