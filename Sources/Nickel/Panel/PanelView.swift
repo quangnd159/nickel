@@ -326,7 +326,9 @@ struct PanelView: View {
                                     .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                                     .transition(sectionSwitchTransition)
                             } else {
-                                LazyVStack(alignment: .leading, spacing: 10) {
+                                // Not lazy: see the comment on the Show All
+                                // `VStack` below for why.
+                                VStack(alignment: .leading, spacing: 10) {
                                     ForEach(items) { note in
                                         NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                             .transition(rowTransition)
@@ -337,7 +339,13 @@ struct PanelView: View {
                                 .animation(rowSpring, value: selection.expandedIDs)
                             }
                         } else {
-                            LazyVStack(alignment: .leading, spacing: 10) {
+                            // Deliberately not lazy: rows migrate between the
+                            // ungrouped and per-section ForEach loops when a
+                            // note is moved into a section, and LazyVStack's
+                            // per-identity cell cache would keep serving the
+                            // pre-move Note snapshot (stale done-checkbox).
+                            // These lists are small, so laziness buys nothing.
+                            VStack(alignment: .leading, spacing: 10) {
                                 ForEach(ungroupedNotes) { note in
                                     NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                         .transition(rowTransition)
