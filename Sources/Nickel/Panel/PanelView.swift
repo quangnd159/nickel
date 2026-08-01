@@ -10,13 +10,22 @@ extension Notification.Name {
     static let nickelComposerPaste = Notification.Name("NickelComposerPaste")
 }
 
+/// Posted by the ⋯ menu's "Close" item so `FloatingPanel` can hide itself via
+/// its normal animated toggle path, without `PanelView` needing a direct
+/// reference back to the panel that hosts it.
+extension Notification.Name {
+    static let nickelClosePanel = Notification.Name("NickelClosePanel")
+}
+
 struct VisualEffectBackground: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .hudWindow
 
     func makeNSView(context: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = material
-        view.state = .active
+        // Native windows dim their material when they're not the active
+        // window; `.active` would freeze the focused look permanently.
+        view.state = .followsWindowActiveState
         view.blendingMode = .behindWindow
         return view
     }
@@ -37,6 +46,15 @@ struct StagedAttachment: Identifiable {
     var contentType: String
 }
 
+/// A pending "Delete Section and Notes…" confirmation: which section, and
+/// how many notes it holds (captured at request time, for the dialog's
+/// message — see `PanelView.requestDeleteSection`).
+private struct SectionDeleteConfirmation: Identifiable {
+    let name: String
+    let noteCount: Int
+    var id: String { name }
+}
+
 struct PanelView: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
@@ -54,6 +72,11 @@ struct PanelView: View {
     /// the auto-dismiss timer instead of an old one hiding the new toast
     /// early.
     @State private var attachmentToastDismissTask: DispatchWorkItem?
+    /// Staged by the section header's "Delete Section and Notes…" when the
+    /// section isn't empty, so the `.confirmationDialog` in `body` can ask
+    /// before deleting; `nil` when no confirmation is pending. See
+    /// `requestDeleteSection`.
+    @State private var sectionDeleteConfirmation: SectionDeleteConfirmation?
 
     var body: some View {
         ZStack {
@@ -116,6 +139,24 @@ struct PanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .nickelComposerPaste)) { _ in
             stagePasteboardAttachments()
         }
+        .confirmationDialog(
+            "Delete Section",
+            isPresented: Binding(
+                get: { sectionDeleteConfirmation != nil },
+                set: { isPresented in if !isPresented { sectionDeleteConfirmation = nil } }
+            ),
+            presenting: sectionDeleteConfirmation
+        ) { confirmation in
+            Button("Delete", role: .destructive) {
+                store.deleteSection(confirmation.name)
+                sectionDeleteConfirmation = nil
+            }
+            Button("Cancel", role: .cancel) {
+                sectionDeleteConfirmation = nil
+            }
+        } message: { confirmation in
+            Text("Delete \"\(confirmation.name)\" and its \(confirmation.noteCount) \(confirmation.noteCount == 1 ? "note" : "notes")?")
+        }
     }
 
     /// Opens `overlay`, or closes it if it's already the one presented
@@ -161,6 +202,14 @@ struct PanelView: View {
                     }
 
                     Button("New Section") { createAndRenameNewSection() }
+
+                    Button("Rename Section") {
+                        if let activeSection = store.activeSection {
+                            selection.beginRenamingSection(activeSection)
+                        }
+                    }
+                    .keyboardShortcut("r", modifiers: [.command, .shift])
+                    .disabled(store.activeSection == nil)
                 }
 
                 Divider()
@@ -170,12 +219,6 @@ struct PanelView: View {
                 }
                 .disabled(!hasDoneNotesInScope)
 
-                Button("Keyboard Shortcuts") {
-                    selection.presentedOverlay = .shortcuts
-                }
-
-                Divider()
-
                 Button("Copy All as List") {
                     actions.copyAllAsList()
                 }
@@ -184,10 +227,31 @@ struct PanelView: View {
                     NSWorkspace.shared.activateFileViewerSelecting([store.fileURL])
                 }
 
-                Toggle("Launch at Login", isOn: Binding(
-                    get: { LaunchAtLogin.isEnabled },
-                    set: { LaunchAtLogin.setEnabled($0) }
-                ))
+                Divider()
+
+                Button("Keyboard Shortcuts") {
+                    selection.presentedOverlay = .shortcuts
+                }
+
+                Divider()
+
+                Section("Window") {
+                    Toggle("Keep on Top", isOn: Binding(
+                        get: { PanelSettings.keepPanelOnTop },
+                        set: { PanelSettings.keepPanelOnTop = $0 }
+                    ))
+
+                    Button("Close") {
+                        NotificationCenter.default.post(name: .nickelClosePanel, object: nil)
+                    }
+                }
+
+                Divider()
+
+                Button("Settings…") {
+                    SettingsWindowController.shared.show()
+                }
+                .keyboardShortcut(",", modifiers: .command)
 
                 Divider()
 
@@ -279,17 +343,21 @@ struct PanelView: View {
                                         .transition(rowTransition)
                                 }
 
+                                // Every section's header renders here, even
+                                // an empty one: with `sections` as the source
+                                // of truth for existence, Show All is where
+                                // an empty section can be found, reordered,
+                                // or deleted. No per-section empty hint
+                                // though — that would clutter a view meant to
+                                // stay a clean overview.
                                 ForEach(store.sections, id: \.self) { sectionName in
-                                    let items = notes(in: sectionName)
-                                    if !items.isEmpty {
-                                        sectionHeader(sectionName)
-                                            .padding(.top, 12)
-                                            .transition(rowTransition)
+                                    sectionHeader(sectionName)
+                                        .padding(.top, 12)
+                                        .transition(rowTransition)
 
-                                        ForEach(items) { note in
-                                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                                .transition(rowTransition)
-                                        }
+                                    ForEach(notes(in: sectionName)) { note in
+                                        NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                            .transition(rowTransition)
                                     }
                                 }
                             }
@@ -300,6 +368,12 @@ struct PanelView: View {
                             // it needs its own `.animation` keyed off
                             // `expandedIDs` to pick up the same spring.
                             .animation(rowSpring, value: selection.expandedIDs)
+                            // Reordering two sections that are both empty (or
+                            // otherwise don't change which note ids are
+                            // visible) wouldn't otherwise change
+                            // `flatVisibleIDs`, so the headers need their own
+                            // animation keyed off section order directly.
+                            .animation(rowSpring, value: store.sections)
                         }
                     }
                     .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
@@ -391,8 +465,54 @@ struct PanelView: View {
         }
         .contextMenu {
             Button("Rename Section") { selection.beginRenamingSection(sectionName) }
+
+            Divider()
+
+            Button("Move Up") { store.moveSection(sectionName, offset: -1) }
+                .disabled(store.sections.first == sectionName)
+            Button("Move Down") { store.moveSection(sectionName, offset: 1) }
+                .disabled(store.sections.last == sectionName)
+
+            Divider()
+
+            Button("Clear Done in Section") { store.clearDone(in: sectionName) }
+                .disabled(!hasDoneNotes(inSection: sectionName))
+
+            Divider()
+
+            // Dissolve keeps the notes (ungrouping them); Delete removes
+            // them too — kept as separate, clearly-labeled items rather than
+            // one "Delete" that's ambiguous about which it means.
             Button("Dissolve Section") { store.dissolveSection(sectionName) }
+
+            Button("Delete Section and Notes…", role: .destructive) {
+                requestDeleteSection(sectionName)
+            }
         }
+    }
+
+    /// One item in the section header's context menu: deletes `name`
+    /// immediately if it has no notes (Finder-like — nothing to lose, so no
+    /// confirmation), otherwise stages `sectionDeleteConfirmation` so the
+    /// `.confirmationDialog` in `body` can ask first.
+    private func requestDeleteSection(_ name: String) {
+        let count = noteCount(inSection: name)
+        guard count > 0 else {
+            store.deleteSection(name)
+            return
+        }
+        sectionDeleteConfirmation = SectionDeleteConfirmation(name: name, noteCount: count)
+    }
+
+    /// Note count for `name`, from `store.notes` directly (not
+    /// `filteredNotes`) so the delete confirmation always reflects the
+    /// section's real contents regardless of an active search filter.
+    private func noteCount(inSection name: String) -> Int {
+        store.notes.filter { $0.listName == name }.count
+    }
+
+    private func hasDoneNotes(inSection name: String) -> Bool {
+        store.notes.contains { $0.isDone && $0.listName == name }
     }
 
     /// Shared empty-area click handler: resigns first responder (which

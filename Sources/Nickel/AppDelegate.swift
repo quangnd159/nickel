@@ -9,7 +9,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isCapturing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
         setupMainMenu()
 
         let panel = FloatingPanel(store: noteStore)
@@ -17,10 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
-            button.image = NSImage(
-                systemSymbolName: "square.and.pencil",
-                accessibilityDescription: "Nickel"
-            )
+            button.image = StatusItemIcon.make()
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -29,7 +25,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // *every* click (left or right) show the menu instead of reaching
         // `statusItemClicked`. The menu is instead assigned on demand for a
         // right-click only, in `statusItemClicked`.
+        item.isVisible = PanelSettings.showMenuBarIcon
         statusItem = item
+
+        NotificationCenter.default.addObserver(
+            forName: PanelSettings.showMenuBarIconDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.statusItem?.isVisible = PanelSettings.showMenuBarIcon
+        }
 
         HotkeyMonitor.shared.onDoubleShift = { [weak self] side in self?.handleDoubleShift(side) }
         startHotkeyMonitorOrPromptForAccess()
@@ -64,10 +69,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleDoubleShift(_ side: ShiftSide) {
         switch side {
         case .right:
-            // The panel is a nonactivating NSPanel, so it can be key without being the
-            // frontmost app; toggling here also dismisses it while it's key, which commits
-            // any in-progress edit (renaming a list, composing) via the existing
-            // focus-loss paths.
+            // Toggling here also dismisses the panel while it's key, which
+            // commits any in-progress edit (renaming a list, composing) via
+            // the existing focus-loss paths.
             panel?.toggle()
         case .left:
             captureSelectedText()
@@ -95,20 +99,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Nickel is `LSUIElement` (no Dock icon, no visible menu bar), but AppKit
-    /// still routes key equivalents (⌘Q, ⌘C/V/X/A, ⌘Z) through the app's main
-    /// menu regardless of whether it's ever shown. Without one, ⌘Q can't quit
-    /// the app and standard text editing shortcuts don't work in the search
-    /// field, composer, or inline note editors. This installs the minimal
-    /// menu needed for that routing to work; it's never visible to the user.
+    /// The full, Copper-parity main menu, shown in the menu bar whenever
+    /// Nickel is the active app. AppKit also routes key equivalents (⌘Q,
+    /// ⌘C/V/X/A, ⌘Z) through it, which is what keeps those shortcuts
+    /// working in the search field, composer, and inline editors.
     private func setupMainMenu() {
         let mainMenu = NSMenu()
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
+
+        let aboutItem = NSMenuItem(title: "About Nickel", action: #selector(showAbout), keyEquivalent: "")
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
+
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        appMenu.addItem(updateItem)
+
+        appMenu.addItem(.separator())
+
+        let revealItem = NSMenuItem(
+            title: "Reveal Notes in Finder",
+            action: #selector(revealNotesInFinder),
+            keyEquivalent: ""
+        )
+        revealItem.target = self
+        appMenu.addItem(revealItem)
+
+        appMenu.addItem(.separator())
+
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+
+        appMenu.addItem(.separator())
+
+        let servicesMenu = NSMenu()
+        let servicesItem = NSMenuItem(title: "Services", action: nil, keyEquivalent: "")
+        servicesItem.submenu = servicesMenu
+        appMenu.addItem(servicesItem)
+        NSApp.servicesMenu = servicesMenu
+
+        appMenu.addItem(.separator())
+
+        let hideItem = NSMenuItem(
+            title: "Hide Nickel",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        appMenu.addItem(hideItem)
+
+        let hideOthersItem = NSMenuItem(
+            title: "Hide Others",
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h"
+        )
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(hideOthersItem)
+
+        appMenu.addItem(
+            NSMenuItem(
+                title: "Show All",
+                action: #selector(NSApplication.unhideAllApplications(_:)),
+                keyEquivalent: ""
+            )
+        )
+
+        appMenu.addItem(.separator())
+
         appMenu.addItem(
             NSMenuItem(title: "Quit Nickel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         )
+
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
@@ -126,6 +193,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
         editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        // No key equivalent: ⌫ already deletes via the panel/field's own key
+        // handling, so this exists for discoverability and menu-driven use
+        // (e.g. VoiceOver), not as the primary way to delete.
+        editMenu.addItem(NSMenuItem(title: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: ""))
         editMenu.addItem(.separator())
         editMenu.addItem(
             NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
@@ -133,11 +204,175 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
 
+        // A "View" menu for section navigation: each item first shows the
+        // panel if it's hidden, so ⌘K/⇧⌘]/⇧⌘[/⌘/ work from the menu even
+        // before the panel has ever been summoned. While the panel is key,
+        // its own `performKeyEquivalent` intercepts these key equivalents
+        // ahead of the menu, so there's no double-handling.
+        let viewMenuItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+
+        let switchSectionItem = NSMenuItem(
+            title: "Switch Section…",
+            action: #selector(switchSection),
+            keyEquivalent: "k"
+        )
+        switchSectionItem.target = self
+        viewMenu.addItem(switchSectionItem)
+
+        viewMenu.addItem(.separator())
+
+        let nextSectionItem = NSMenuItem(title: "Next Section", action: #selector(nextSection), keyEquivalent: "]")
+        nextSectionItem.keyEquivalentModifierMask = [.command, .shift]
+        nextSectionItem.target = self
+        viewMenu.addItem(nextSectionItem)
+
+        let previousSectionItem = NSMenuItem(
+            title: "Previous Section",
+            action: #selector(previousSection),
+            keyEquivalent: "["
+        )
+        previousSectionItem.keyEquivalentModifierMask = [.command, .shift]
+        previousSectionItem.target = self
+        viewMenu.addItem(previousSectionItem)
+
+        viewMenu.addItem(.separator())
+
+        let shortcutsItem = NSMenuItem(
+            title: "Keyboard Shortcuts",
+            action: #selector(showKeyboardShortcuts),
+            keyEquivalent: "/"
+        )
+        shortcutsItem.target = self
+        viewMenu.addItem(shortcutsItem)
+
+        viewMenuItem.submenu = viewMenu
+        mainMenu.addItem(viewMenuItem)
+
+        // A "Window" menu with the standard Minimize/Zoom/Close/Bring All to
+        // Front items. Close is bound to ⌘W via `performClose:`, so ⌘W closes
+        // the Settings window (a plain titled `NSWindow`, unlike
+        // `FloatingPanel`, which handles ⌘W itself in its own
+        // `performKeyEquivalent` override and so never reaches here while
+        // it's key).
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.addItem(
+            NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        )
+        windowMenu.addItem(
+            NSMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        )
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(
+            NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        )
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(
+            NSMenuItem(title: "Bring All to Front", action: #selector(NSApplication.arrangeInFront(_:)), keyEquivalent: "")
+        )
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApp.windowsMenu = windowMenu
+
+        // A "Help" menu with a single link out to the project's GitHub page.
+        // Assigning it to `NSApp.helpMenu` lets macOS append its native
+        // search field above the item automatically.
+        let helpMenuItem = NSMenuItem()
+        let helpMenu = NSMenu(title: "Help")
+        let helpItem = NSMenuItem(title: "Nickel Help", action: #selector(showHelp), keyEquivalent: "?")
+        helpItem.target = self
+        helpMenu.addItem(helpItem)
+        helpMenuItem.submenu = helpMenu
+        mainMenu.addItem(helpMenuItem)
+        NSApp.helpMenu = helpMenu
+
         NSApp.mainMenu = mainMenu
     }
 
+    /// Shared by the View menu's Switch Section / Next Section / Previous
+    /// Section / Keyboard Shortcuts items: the panel has to be visible before
+    /// any of these mean anything, since they all act on (or are shown atop)
+    /// its content.
+    private func showPanelIfHidden() {
+        if let panel, !panel.isVisible {
+            panel.toggle()
+        }
+    }
+
+    @objc private func switchSection() {
+        showPanelIfHidden()
+        NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
+    }
+
+    @objc private func nextSection() {
+        showPanelIfHidden()
+        noteStore.cycleActiveSection(direction: 1)
+    }
+
+    @objc private func previousSection() {
+        showPanelIfHidden()
+        noteStore.cycleActiveSection(direction: -1)
+    }
+
+    @objc private func showKeyboardShortcuts() {
+        showPanelIfHidden()
+        NotificationCenter.default.post(name: .nickelToggleShortcuts, object: nil)
+    }
+
+    @objc private func showHelp() {
+        NSWorkspace.shared.open(URL(string: "https://github.com/quangnd159/nickel")!)
+    }
+
+    /// The status item's right-click menu: a compact mirror of the app menu
+    /// for reaching Nickel without activating it (the real menu bar only
+    /// shows while Nickel is the active app).
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
+
+        let aboutItem = NSMenuItem(
+            title: "About Nickel",
+            action: #selector(showAbout),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        menu.addItem(aboutItem)
+
+        let updateItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        updateItem.target = self
+        menu.addItem(updateItem)
+
+        menu.addItem(.separator())
+
+        let revealItem = NSMenuItem(
+            title: "Reveal Notes in Finder",
+            action: #selector(revealNotesInFinder),
+            keyEquivalent: ""
+        )
+        revealItem.target = self
+        menu.addItem(revealItem)
+
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(showSettings),
+            keyEquivalent: ""
+        )
+        settingsItem.target = self
+        menu.addItem(settingsItem)
+
+        menu.addItem(.separator())
+
+        let toggleItem = NSMenuItem(
+            title: "Toggle Panel",
+            action: #selector(togglePanel),
+            keyEquivalent: ""
+        )
+        toggleItem.target = self
+        menu.addItem(toggleItem)
 
         if !Permissions.isTrusted {
             let grantItem = NSMenuItem(
@@ -147,16 +382,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             )
             grantItem.target = self
             menu.addItem(grantItem)
-            menu.addItem(.separator())
         }
-
-        let toggleItem = NSMenuItem(
-            title: "Toggle Panel",
-            action: #selector(togglePanel),
-            keyEquivalent: ""
-        )
-        toggleItem.target = self
-        menu.addItem(toggleItem)
 
         menu.addItem(.separator())
 
@@ -178,6 +404,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Permissions.openAccessibilitySettings()
     }
 
+    @objc private func revealNotesInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([noteStore.fileURL])
+    }
+
+    @objc private func showSettings() {
+        SettingsWindowController.shared.show()
+    }
+
+    @objc private func checkForUpdates() {
+        UpdateChecker.check()
+    }
+
+    @objc private func showAbout() {
+        NSApp.activate()
+        NSApp.orderFrontStandardAboutPanel(nil)
+    }
+
     /// Left click toggles the panel directly; right click shows the overflow
     /// menu (Toggle Panel / Quit). Distinguishing the two requires *not*
     /// assigning `statusItem.menu` permanently — instead the menu is
@@ -195,6 +438,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             togglePanel()
         }
+    }
+
+    /// Dock icon click (only reachable with "Show Dock Icon" on): the
+    /// standard reopen behavior is to bring up the app's window, which for
+    /// Nickel means showing the panel if it's hidden.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if let panel, !panel.isVisible {
+            panel.toggle()
+        }
+        return true
     }
 
     func applicationWillTerminate(_ notification: Notification) {

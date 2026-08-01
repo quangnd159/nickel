@@ -254,6 +254,22 @@ final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Steps the active section forward (`direction: 1`) or backward
+    /// (`direction: -1`) through the cycle Show All → each section in
+    /// `sections` order → wraps back to Show All. Shared by the panel's
+    /// ⇧⌘]/⇧⌘[ handling and the View menu's Next/Previous Section items, so
+    /// the cycle logic lives in one place.
+    func cycleActiveSection(direction: Int) {
+        guard !sections.isEmpty else { return }
+
+        // The cycle is Show All (nil) followed by each section name; index 0
+        // is Show All.
+        let currentIndex = activeSection.flatMap { sections.firstIndex(of: $0).map { $0 + 1 } } ?? 0
+        let count = sections.count + 1
+        let nextIndex = ((currentIndex + direction) % count + count) % count
+        setActiveSection(nextIndex == 0 ? nil : sections[nextIndex - 1])
+    }
+
     /// Notes survive; the section grouping disappears (all matching notes'
     /// `listName` is cleared, the section is removed from `sections`, and if
     /// it was active, `activeSection` resets to Show All).
@@ -269,17 +285,60 @@ final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Deletes `name` and every note in it — the opposite of `dissolveSection`,
+    /// which keeps the notes. Routed through `delete(ids:)` so attachment
+    /// directories are cleaned up like any other note deletion. No-op if
+    /// `name` isn't a known section.
+    func deleteSection(_ name: String) {
+        guard sections.contains(name) else { return }
+        let ids = Set(notes.filter { $0.listName == name }.map(\.id))
+        if !ids.isEmpty {
+            delete(ids: ids)
+        }
+        sections.removeAll { $0 == name }
+        if activeSection == name {
+            activeSection = nil
+        }
+        scheduleSave()
+    }
+
+    /// Reorders `sections` by moving `name` one slot toward `offset` (`-1`
+    /// up, `+1` down), swapping with its immediate neighbor. No-op if `name`
+    /// isn't a known section or the move would go past either edge.
+    func moveSection(_ name: String, offset: Int) {
+        guard let index = sections.firstIndex(of: name) else { return }
+        let newIndex = index + offset
+        guard sections.indices.contains(newIndex) else { return }
+        sections.swapAt(index, newIndex)
+        scheduleSave()
+    }
+
     /// Deletes done notes. Scoped to the active section if one is set,
     /// otherwise clears done notes across every section (and ungrouped).
     func clearDone() {
-        let toRemove: [Note]
-        if let activeSection {
-            toRemove = notes.filter { $0.isDone && $0.listName == activeSection }
-            notes.removeAll { $0.isDone && $0.listName == activeSection }
-        } else {
-            toRemove = notes.filter(\.isDone)
-            notes.removeAll(where: \.isDone)
+        guard let activeSection else {
+            removeDoneNotes(matching: \.isDone)
+            return
         }
+        clearDone(in: activeSection)
+    }
+
+    /// Clears done notes in `sectionName` specifically, regardless of
+    /// whatever section (if any) is currently active — unlike `clearDone()`,
+    /// which is scoped to `activeSection`. Used by the section header's
+    /// context menu, where "Clear Done in Section" should act on the section
+    /// under the cursor even when a different section (or Show All) is
+    /// focused.
+    func clearDone(in sectionName: String) {
+        removeDoneNotes { $0.isDone && $0.listName == sectionName }
+    }
+
+    /// Shared removal logic for `clearDone()` and `clearDone(in:)`: deletes
+    /// every note matching `predicate` and its attachments directory.
+    private func removeDoneNotes(matching predicate: (Note) -> Bool) {
+        let toRemove = notes.filter(predicate)
+        guard !toRemove.isEmpty else { return }
+        notes.removeAll(where: predicate)
         for note in toRemove {
             removeAttachmentsDirectory(forNoteID: note.id)
         }

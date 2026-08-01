@@ -24,12 +24,19 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         let size = NSSize(width: 360, height: 560)
         self.init(
             contentRect: NSRect(origin: .zero, size: size),
-            styleMask: [.nonactivatingPanel, .borderless, .resizable],
+            // Deliberately NOT `.nonactivatingPanel`: that flag opts the
+            // window out of native click-to-activate, and since macOS 14's
+            // cooperative activation an app can no longer force-activate
+            // itself to compensate (`activate()` is only a request, honored
+            // when the frontmost app yields or the user clicks one of our
+            // windows). A normal panel gets activation — and with it the
+            // menu bar — through the system's own path.
+            styleMask: [.borderless, .resizable],
             backing: .buffered,
             defer: false
         )
 
-        level = .floating
+        level = PanelSettings.keepPanelOnTop ? .floating : .normal
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
@@ -56,6 +63,31 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(keepOnTopSettingChanged),
+            name: PanelSettings.keepOnTopDidChange,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(closeRequested),
+            name: .nickelClosePanel,
+            object: nil
+        )
+    }
+
+    @objc private func keepOnTopSettingChanged() {
+        level = PanelSettings.keepPanelOnTop ? .floating : .normal
+    }
+
+    /// Posted by the ⋯ menu's "Close" item: hides the panel via the same
+    /// animated path as ⌘W and the right-Shift toggle, rather than a plain
+    /// `orderOut`.
+    @objc private func closeRequested() {
+        if isVisible {
+            toggle()
+        }
     }
 
     override var canBecomeKey: Bool { true }
@@ -154,6 +186,20 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     private func animateShow(generation: Int) {
         isAnimatingToggle = true
+        // If a previous hide left the app hidden (see `animateHide`'s
+        // yield-focus step), bring it back so its windows can order front
+        // again.
+        if NSApp.isHidden {
+            NSApp.unhideWithoutActivation()
+        }
+        // Without `.nonactivatingPanel`, the panel only receives keyboard
+        // input while Nickel is the active app, so a hotkey summon has to
+        // request activation. Under cooperative activation this is a
+        // request, not a guarantee — if the system declines, the panel is
+        // still frontmost and the first click activates natively.
+        if !NSApp.isActive {
+            NSApp.activate()
+        }
         let targetFrame = frame
         var startFrame = targetFrame
         startFrame.origin.x += Self.toggleSlideOffset
@@ -195,7 +241,28 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             // hidden, so the next show animates from the right place.
             self.setFrame(restingFrame, display: false)
             self.isAnimatingToggle = false
+            self.yieldFocusIfNeeded()
         }
+    }
+
+    /// With the Dock icon on, a panel click can `NSApp.activate` Nickel (see
+    /// `sendEvent`). If the panel is then dismissed while Nickel is still
+    /// active and no other Nickel window (Settings, About) is up, activation
+    /// would otherwise strand Nickel as the active app with no windows and a
+    /// stale menu bar — `NSApp.hide(nil)` is the standard trick to hand
+    /// focus back to whatever was frontmost before. `animateShow` undoes
+    /// this with `unhideWithoutActivation()` the next time the panel opens.
+    private func yieldFocusIfNeeded() {
+        guard NSApp.isActive else { return }
+        // "Other windows" means real, titled ones (Settings, the About
+        // panel — itself an `NSPanel`, so a class check would miss it), not
+        // chrome like the status item's window or the capture HUD, which are
+        // borderless and always around.
+        let otherWindowVisible = NSApp.windows.contains {
+            $0.isVisible && $0 !== self && $0.styleMask.contains(.titled)
+        }
+        guard !otherWindowVisible else { return }
+        NSApp.hide(nil)
     }
 
     override func cancelOperation(_ sender: Any?) {
@@ -232,6 +299,40 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
             return true
         }
+        if modifiers == [.command], characters == "w" {
+            if isVisible { toggle() }
+            return true
+        }
+        if modifiers == [.command], characters == "," {
+            SettingsWindowController.shared.show()
+            return true
+        }
+        // ⌘⇧] / ⌘⇧[ cycle through Show All + each section in order. Matched
+        // loosely: with Shift held, `charactersIgnoringModifiers` (which
+        // honors Shift, unlike Command) can deliver either the bracket itself
+        // or its shifted form ("}"/"{"), and observed behavior has varied by
+        // keyboard layout, so the keyCode (30 = ']', 33 = '[' on ANSI) is
+        // checked as a robust fallback alongside the characters.
+        if modifiers == [.command, .shift],
+           characters == "]" || characters == "}" || event.keyCode == 30 {
+            cycleSection(direction: 1)
+            return true
+        }
+        if modifiers == [.command, .shift],
+           characters == "[" || characters == "{" || event.keyCode == 33 {
+            cycleSection(direction: -1)
+            return true
+        }
+        // ⇧⌘R renames the focused section, mirroring the header's
+        // double-click/context-menu rename. Swallowed even with no section
+        // focused (or an overlay already up) so it never falls through to
+        // type into a field.
+        if modifiers == [.command, .shift], characters == "r" {
+            if let section = panelActions?.store.activeSection, selectionModel.presentedOverlay == nil {
+                selectionModel.beginRenamingSection(section)
+            }
+            return true
+        }
 
         // ⌘V when the pasteboard has attachable content: redirect to staging
         // attachments in the composer instead of a normal text paste. This
@@ -252,6 +353,14 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         }
 
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// Steps the active section forward (`direction: 1`) or backward
+    /// (`direction: -1`). The cycle itself lives on `NoteStore` so the panel
+    /// and the View menu's Next/Previous Section items share one
+    /// implementation.
+    private func cycleSection(direction: Int) {
+        panelActions?.store.cycleActiveSection(direction: direction)
     }
 
     /// True when the general pasteboard carries file URLs (regardless of any
@@ -293,6 +402,17 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// focus would take two Escapes (one blurring the composer, one closing
     /// the card). This also covers the section switcher's own field, whose
     /// `cancelOperation` intercept becomes a never-reached fallback.
+    ///
+    /// Also activates Nickel on a deliberate mouse click into the panel,
+    /// when the Dock icon setting is on. The panel stays a
+    /// `.nonactivatingPanel` so double-shift show and typing never steal
+    /// activation from the frontmost app (that's the whole point of the
+    /// capture flow), but a click should behave like clicking any other
+    /// app's window — otherwise Nickel would have a menu bar and Dock icon
+    /// that never actually go frontmost. Checked here rather than in
+    /// `mouseDown`, since clicks landing on subviews (buttons, fields) are
+    /// dispatched straight to those views and never reach the window's own
+    /// `mouseDown`.
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.keyCode == 53, selectionModel.presentedOverlay != nil {
             selectionModel.presentedOverlay = nil

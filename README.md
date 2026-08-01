@@ -2,9 +2,15 @@
 
 Nickel is a personal-use knockoff of [Copper by shadcn](https://shadcn.com/copper),
 built because I wanted the workflow it describes and didn't want to wait. If
-you want the real, polished thing — and to support the person who designed
-it — [buy Copper](https://shadcn.com/copper) instead. This is a rough,
-free stand-in for personal use, not a replacement for it.
+you want the original (and to support the person who designed it),
+[buy Copper](https://shadcn.com/copper) instead.
+
+Knockoff does not mean careless. Nickel is held to the same bar an original
+would be: native AppKit/SwiftUI following macOS platform conventions and the
+Human Interface Guidelines, Finder-idiom interactions (inline rename,
+confirm-only-when-destructive), full keyboard operability, defensive
+persistence (atomic writes, corruption recovery, orphan cleanup), and
+deliberate visual design. No slop, no shortcuts that show.
 
 Nickel is a macOS menu-bar scratchpad: double-tap the left Shift key anywhere
 to capture whatever text you have selected, or double-tap the right Shift
@@ -25,10 +31,18 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 - **Floating panel**: a borderless, always-on-top scratchpad panel with search,
   a note composer, checkable notes, multi-select, inline editing, expand/
   collapse for long notes, and drag-free custom lists ("Move to…").
-- **Menu bar item**: left-click toggles the panel; right-click shows an
-  overflow menu (Toggle Panel, Quit).
-- **Panel overflow menu**: Copy All as List, a Launch at Login toggle, and
-  Quit.
+- **Sections**: named groups managed straight from their header — rename,
+  reorder (Move Up/Down), clear done notes in just that section, dissolve
+  (ungroup, keeping the notes), or delete outright (with the notes). Cycle
+  through Show All and each section with ⇧⌘] / ⇧⌘[.
+- **Standard app chrome**: Nickel is a regular macOS app — Dock icon, full
+  "Nickel" menu bar when active, About panel, and update checks, with full
+  Edit/View/Window/Help menus. A menu bar item is also shown (left-click
+  toggles the panel; right-click shows an overflow menu), with a Settings
+  toggle to hide it for hotkey-first use.
+- **Panel overflow menu**: section switching, Clear Done, Copy All as List,
+  Reveal Notes in Finder, Keyboard Shortcuts, a Keep on Top toggle, Close,
+  Settings…, and Quit.
 - **Frame persistence**: the panel remembers where you left it (position and
   size) across relaunches, and clamps back onscreen if a display is
   disconnected.
@@ -46,6 +60,10 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | -------- | ---------------------------------------------------------- |
 | **Left ⇧⇧**  | Capture the current selection                          |
 | **Right ⇧⇧** | Toggle the floating panel                               |
+| **⌘K**   | Switch section                                               |
+| **⇧⌘]**  | Next section                                                 |
+| **⇧⌘[**  | Previous section                                             |
+| **⇧⌘R**  | Rename the focused section                                   |
 | **⌘N**   | Focus the composer                                          |
 | **⌘F**   | Focus search                                                |
 | **⌘A**   | Select all notes                                            |
@@ -57,6 +75,8 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | **⇧⌘M**  | Merge the selected notes into one                            |
 | **⌫**    | Delete the selected note(s)                                 |
 | **Esc**  | Clear selection, cancel an edit, or dismiss the panel        |
+| **⌘W**   | Close the panel                                              |
+| **⌘,**   | Open Settings                                                |
 
 Arrow keys move the selection; hold ⇧ to extend a range.
 
