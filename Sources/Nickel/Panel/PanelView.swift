@@ -592,9 +592,11 @@ struct PanelView: View {
                     .font(.system(size: 19, weight: .light))
                     .foregroundStyle(.quaternary)
                     .frame(height: 19)
+                    .accessibilityHidden(true)
 
                 ComposerField(text: $composerText, onCommit: commitComposer)
                     .font(.system(size: 14))
+                    .accessibilityLabel("Add a note or a prompt")
 
                 Button(action: presentAttachmentPicker) {
                     Image(systemName: "paperclip")

@@ -26,12 +26,24 @@ struct NoteRow: View {
     /// card (begin editing).
     @State private var attachmentFrames: [AttachmentFrame] = []
 
+    /// The checkbox `Button`'s live frame (in `attachmentsSpace`), kept via
+    /// `CheckboxFramePreferenceKey`. Lets `isInCheckboxColumn` hit-test
+    /// against the checkbox's actual measured position instead of a
+    /// hand-summed constant that would silently drift out of sync with the
+    /// card's padding or the HStack's spacing.
+    @State private var checkboxFrame: CGRect = .zero
+
     private var isSelected: Bool { selection.selectedIDs.contains(note.id) }
     private var isEditing: Bool { selection.editingID == note.id }
     private static let attachmentsSpace = "NoteRow.attachments"
 
+    /// Gap between the checkbox and the note content. Shared by the HStack
+    /// below and `isInCheckboxColumn`'s column-extension math so the two
+    /// stay in sync instead of duplicating the value.
+    private static let checkboxContentSpacing: CGFloat = 12
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: Self.checkboxContentSpacing) {
             Button(action: onToggleDone) {
                 Image(systemName: note.isDone ? "checkmark.circle.fill" : "circle")
                     .font(.system(size: 19, weight: .light))
@@ -39,6 +51,12 @@ struct NoteRow: View {
                     .frame(height: 19)
             }
             .buttonStyle(.plain)
+            // Hidden from accessibility rather than labeled: `.combine` on
+            // the row would concatenate a label into the row's own text
+            // ("Mark as Done, <note text>"), and the toggle is already
+            // exposed as the row's named action (see below).
+            .accessibilityHidden(true)
+            .reportingCheckboxFrame(in: Self.attachmentsSpace)
 
             Group {
                 if isEditing {
@@ -48,6 +66,12 @@ struct NoteRow: View {
                 }
             }
         }
+        // Reads the row as one element (note text once, not a bag of static
+        // texts) while editing keeps the text field individually reachable.
+        // `.combine` gives a nested `Button` an implicit button trait on the
+        // whole row without carrying over its tap handler, so the toggle is
+        // exposed explicitly as a named action instead of relying on that.
+        .noteRowAccessibility(isDone: note.isDone, isEditing: isEditing, toggleDone: onToggleDone)
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
         .background(
@@ -61,6 +85,7 @@ struct NoteRow: View {
         )
         .coordinateSpace(name: Self.attachmentsSpace)
         .onPreferenceChange(AttachmentFramesPreferenceKey.self) { attachmentFrames = $0 }
+        .onPreferenceChange(CheckboxFramePreferenceKey.self) { checkboxFrame = $0 }
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
         // Row-wide click target: clicking anywhere on the card (including its
         // padding) selects it. `simultaneousGesture` (rather than a plain,
@@ -70,8 +95,10 @@ struct NoteRow: View {
         // click-to-select feel slow. Because simultaneous gestures don't
         // exclude the checkbox `Button`'s own tap handling, both handlers
         // explicitly ignore hits that land in the checkbox column (see
-        // `isInCheckboxColumn`) so the checkbox stays selection-inert (a pure
-        // work-tracking control, Copper/Reminders/Things-style).
+        // `isInCheckboxColumn`, which hit-tests against the checkbox's
+        // measured frame rather than a hand-summed constant) so the checkbox
+        // stays selection-inert (a pure work-tracking control,
+        // Copper/Reminders/Things-style).
         .contentShape(Rectangle())
         .simultaneousGesture(
             SpatialTapGesture(count: 1).onEnded { value in handleSingleClick(at: value.location) }
@@ -181,6 +208,7 @@ struct NoteRow: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(.quaternary, lineWidth: 1)
             )
+            .accessibilityLabel(attachment.filename)
             .reportingAttachmentFrame(id: attachment.id, in: Self.attachmentsSpace)
     }
 
@@ -189,6 +217,10 @@ struct NoteRow: View {
             AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 28)
                 .frame(width: 28, height: 28)
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                // Decorative: the filename `Text` alongside it already
+                // labels the card, so this icon would otherwise be a second,
+                // redundant element.
+                .accessibilityHidden(true)
 
             Text(attachment.filename)
                 .font(.system(size: 11))
@@ -215,13 +247,14 @@ struct NoteRow: View {
 
     // MARK: - Click handling
 
-    // Card horizontal padding (14) + checkbox glyph width (19) + half the
-    // HStack's 12pt gap (6) = 39: taps left of this x fall on the checkbox
-    // and belong to its own Button, not row selection.
-    private let checkboxColumnMaxX: CGFloat = 14 + 19 + 12 / 2
-
+    /// Anything left of the checkbox's measured right edge, plus half the
+    /// gap to the note content, counts as checkbox territory — a click
+    /// slightly above or below the 19×19 glyph but still in that column is
+    /// forgiven, matching the full-height column this used to compute from
+    /// hand-summed constants. `y` isn't checked at all: the column runs the
+    /// row's full height.
     private func isInCheckboxColumn(_ location: CGPoint) -> Bool {
-        location.x < checkboxColumnMaxX
+        location.x < checkboxFrame.maxX + Self.checkboxContentSpacing / 2
     }
 
     private func handleSingleClick(at location: CGPoint) {
@@ -390,7 +423,30 @@ private struct AttachmentFramesPreferenceKey: PreferenceKey {
     }
 }
 
+/// The checkbox `Button`'s on-screen frame, reported in
+/// `NoteRow.attachmentsSpace` so `isInCheckboxColumn` can hit-test against
+/// it instead of a hand-summed constant.
+private struct CheckboxFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
 private extension View {
+    /// Exposes a note row as a single VoiceOver element: `.combine` merges
+    /// the checkbox and note text into one readable label, the done state
+    /// becomes the element's value, and toggling it is a named action
+    /// (rather than a separately focusable nested button, which `.combine`
+    /// doesn't preserve). While editing, children stay individually
+    /// reachable so the inline text field keeps normal VoiceOver behavior.
+    func noteRowAccessibility(isDone: Bool, isEditing: Bool, toggleDone: @escaping () -> Void) -> some View {
+        self
+            .accessibilityElement(children: isEditing ? .contain : .combine)
+            .accessibilityValue(isEditing ? "" : (isDone ? "Done" : "Not Done"))
+            .accessibilityAction(named: Text(isDone ? "Mark as Not Done" : "Mark as Done"), toggleDone)
+    }
+
     /// Publishes this view's frame (in the named coordinate space) as an
     /// `AttachmentFramesPreferenceKey` entry for `id`, so an ancestor can
     /// hit-test clicks against it without the attachment view needing its
@@ -402,6 +458,21 @@ private extension View {
                 Color.clear.preference(
                     key: AttachmentFramesPreferenceKey.self,
                     value: [AttachmentFrame(id: id, frame: geometry.frame(in: .named(coordinateSpace)))]
+                )
+            }
+        )
+    }
+
+    /// Publishes this view's frame (in the named coordinate space) as the
+    /// `CheckboxFramePreferenceKey` value, so an ancestor can hit-test clicks
+    /// against the checkbox's actual measured position — see
+    /// `NoteRow.isInCheckboxColumn`.
+    func reportingCheckboxFrame(in coordinateSpace: String) -> some View {
+        background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: CheckboxFramePreferenceKey.self,
+                    value: geometry.frame(in: .named(coordinateSpace))
                 )
             }
         )
