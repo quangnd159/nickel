@@ -194,12 +194,8 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         }
         // Without `.nonactivatingPanel`, the panel only receives keyboard
         // input while Nickel is the active app, so a hotkey summon has to
-        // request activation. Under cooperative activation this is a
-        // request, not a guarantee — if the system declines, the panel is
-        // still frontmost and the first click activates natively.
-        if !NSApp.isActive {
-            NSApp.activate()
-        }
+        // request activation.
+        activateForSummon()
         let targetFrame = frame
         var startFrame = targetFrame
         startFrame.origin.x += Self.toggleSlideOffset
@@ -353,6 +349,23 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         }
 
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// Activates Nickel for a hotkey summon. Under macOS 14 cooperative
+    /// activation a bare `NSApp.activate()` is routinely declined when
+    /// another app is frontmost (a global event tap isn't user intent the
+    /// system recognizes), which left the summoned panel visible but not
+    /// key. `activate(from:options:)` is the documented handoff for exactly
+    /// this: the target names the frontmost app as the one yielding to it.
+    /// The bare `activate()` remains as a fallback if that's declined.
+    private func activateForSummon() {
+        guard !NSApp.isActive else { return }
+        if let front = NSWorkspace.shared.frontmostApplication,
+           front != .current,
+           NSRunningApplication.current.activate(from: front, options: [.activateIgnoringOtherApps]) {
+            return
+        }
+        NSApp.activate()
     }
 
     /// Steps the active section forward (`direction: 1`) or backward
