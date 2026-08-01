@@ -105,14 +105,19 @@ final class PanelActions: ObservableObject {
     /// list is now empty) nothing.
     func delete() {
         guard !selection.selectedIDs.isEmpty else { return }
+        // Snapshot both before mutating: `SelectionModel` prunes its
+        // selection synchronously when the store's notes change, so reading
+        // `selectedIDs` (or the computed `visibleOrder`) after the delete
+        // would see post-delete state.
+        let deletedIDs = selection.selectedIDs
         let order = selection.visibleOrder
-        let deletedIndices = order.indices.filter { selection.selectedIDs.contains(order[$0]) }
+        let deletedIndices = order.indices.filter { deletedIDs.contains(order[$0]) }
         let lastDeletedIndex = deletedIndices.max()
         let firstDeletedIndex = deletedIndices.min()
 
-        store.delete(ids: selection.selectedIDs)
+        store.delete(ids: deletedIDs)
 
-        let survivors = order.filter { !selection.selectedIDs.contains($0) }
+        let survivors = order.filter { !deletedIDs.contains($0) }
         var nextSelectionID: UUID?
         if let lastDeletedIndex {
             if let after = order[(lastDeletedIndex + 1)...].first(where: { survivors.contains($0) }) {

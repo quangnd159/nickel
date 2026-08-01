@@ -2,7 +2,13 @@ import AppKit
 import SwiftUI
 
 final class FloatingPanel: NSPanel, NSWindowDelegate {
-    private let selectionModel = SelectionModel()
+    // Implicitly-unwrapped: `SelectionModel` needs the store, which isn't
+    // available until inside the convenience init below (after the
+    // required `self.init(contentRect:...)` call), so it can't be a
+    // default-valued `let` the way the old parameterless `SelectionModel()`
+    // was. Set exactly once, immediately after `self.init`, before anything
+    // else in the initializer touches it.
+    private var selectionModel: SelectionModel!
     private var panelActions: PanelActions?
 
     /// Bumped on every `toggle()` call; an in-flight show/hide animation
@@ -45,6 +51,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         hasShadow = true
         delegate = self
 
+        selectionModel = SelectionModel(store: store)
         let actions = PanelActions(store: store, selection: selectionModel)
         panelActions = actions
 

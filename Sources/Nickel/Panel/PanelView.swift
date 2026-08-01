@@ -59,7 +59,6 @@ struct PanelView: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
-    @State private var searchText = ""
     @State private var composerText = ""
     @State private var pendingAttachments: [StagedAttachment] = []
     @State private var isComposerDropTargeted = false
@@ -101,7 +100,7 @@ struct PanelView: View {
                 // active section, the pinned header + per-section hint must
                 // show even when there are no notes anywhere yet (e.g. the
                 // user's very first action was typing "# Name").
-                if store.notes.isEmpty && searchText.isEmpty && store.activeSection == nil {
+                if store.notes.isEmpty && selection.searchText.isEmpty && store.activeSection == nil {
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -128,8 +127,6 @@ struct PanelView: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .onAppear { selection.updateVisibleOrder(flatVisibleIDs) }
-        .onChange(of: flatVisibleIDs) { _, newValue in selection.updateVisibleOrder(newValue) }
         .onReceive(NotificationCenter.default.publisher(for: .nickelToggleSectionSwitcher)) { _ in
             toggleOverlay(.sectionSwitcher)
         }
@@ -176,9 +173,11 @@ struct PanelView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
                     .font(.system(size: 12))
+                    .accessibilityHidden(true)
 
-                SearchField(text: $searchText, onEscape: handleSearchEscape)
+                SearchField(text: $selection.searchText, onEscape: handleSearchEscape)
                     .font(.system(size: 13))
+                    .accessibilityLabel("Search")
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -273,34 +272,6 @@ struct PanelView: View {
 
     // MARK: - Note list
 
-    private var filteredNotes: [Note] {
-        guard !searchText.isEmpty else { return store.notes }
-        return store.notes.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
-    }
-
-    private var ungroupedNotes: [Note] {
-        filteredNotes.filter { $0.listName == nil }
-    }
-
-    private func notes(in sectionName: String) -> [Note] {
-        filteredNotes.filter { $0.listName == sectionName }
-    }
-
-    /// The flat, filtered, visible order of note IDs, matching `noteList`'s
-    /// display order exactly: just the active section's notes when one is
-    /// focused, otherwise ungrouped notes first, then each section's notes.
-    /// `SelectionModel` uses this for range selection and arrow-key nav.
-    private var flatVisibleIDs: [UUID] {
-        if let activeSection = store.activeSection {
-            return notes(in: activeSection).map(\.id)
-        }
-        var ids = ungroupedNotes.map(\.id)
-        for sectionName in store.sections {
-            ids += notes(in: sectionName).map(\.id)
-        }
-        return ids
-    }
-
     private var noteList: some View {
         VStack(alignment: .leading, spacing: 0) {
             // The active section's header is pinned above the scroll
@@ -320,7 +291,7 @@ struct PanelView: View {
                             .onTapGesture { handleBackgroundClick() }
 
                         if let activeSection = store.activeSection {
-                            let items = notes(in: activeSection)
+                            let items = selection.notes(in: activeSection)
                             if items.isEmpty {
                                 emptySectionHint
                                     .frame(maxWidth: .infinity, minHeight: geometry.size.height)
@@ -335,7 +306,7 @@ struct PanelView: View {
                                     }
                                 }
                                 .transition(sectionSwitchTransition)
-                                .animation(rowSpring, value: flatVisibleIDs)
+                                .animation(rowSpring, value: selection.visibleOrder)
                                 .animation(rowSpring, value: selection.expandedIDs)
                             }
                         } else {
@@ -346,7 +317,7 @@ struct PanelView: View {
                             // pre-move Note snapshot (stale done-checkbox).
                             // These lists are small, so laziness buys nothing.
                             VStack(alignment: .leading, spacing: 10) {
-                                ForEach(ungroupedNotes) { note in
+                                ForEach(selection.notes(in: nil)) { note in
                                     NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                         .transition(rowTransition)
                                 }
@@ -363,23 +334,23 @@ struct PanelView: View {
                                         .padding(.top, 12)
                                         .transition(rowTransition)
 
-                                    ForEach(notes(in: sectionName)) { note in
+                                    ForEach(selection.notes(in: sectionName)) { note in
                                         NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                             .transition(rowTransition)
                                     }
                                 }
                             }
                             .transition(sectionSwitchTransition)
-                            .animation(rowSpring, value: flatVisibleIDs)
+                            .animation(rowSpring, value: selection.visibleOrder)
                             // Expand/collapse changes a row's height without
-                            // adding or removing it from `flatVisibleIDs`, so
+                            // adding or removing it from `visibleOrder`, so
                             // it needs its own `.animation` keyed off
                             // `expandedIDs` to pick up the same spring.
                             .animation(rowSpring, value: selection.expandedIDs)
                             // Reordering two sections that are both empty (or
                             // otherwise don't change which note ids are
                             // visible) wouldn't otherwise change
-                            // `flatVisibleIDs`, so the headers need their own
+                            // `visibleOrder`, so the headers need their own
                             // animation keyed off section order directly.
                             .animation(rowSpring, value: store.sections)
                         }
@@ -513,8 +484,8 @@ struct PanelView: View {
     }
 
     /// Note count for `name`, from `store.notes` directly (not
-    /// `filteredNotes`) so the delete confirmation always reflects the
-    /// section's real contents regardless of an active search filter.
+    /// `selection.filteredNotes`) so the delete confirmation always reflects
+    /// the section's real contents regardless of an active search filter.
     private func noteCount(inSection name: String) -> Int {
         store.notes.filter { $0.listName == name }.count
     }
@@ -897,8 +868,8 @@ struct PanelView: View {
     /// focus so a subsequent Esc falls through to the panel's own Esc
     /// handling (clear selection / hide panel).
     private func handleSearchEscape() {
-        if !searchText.isEmpty {
-            searchText = ""
+        if !selection.searchText.isEmpty {
+            selection.searchText = ""
         } else {
             NSApp.keyWindow?.makeFirstResponder(nil)
         }

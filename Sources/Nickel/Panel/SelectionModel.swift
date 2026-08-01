@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 /// A panel-wide modal overlay: the ⌘K section switcher or the ⌘/ keyboard
@@ -11,9 +12,24 @@ enum PanelOverlay {
 /// keyboard-navigation logic that operates over the panel's current flat
 /// visible (filtered, grouped) order of notes.
 final class SelectionModel: ObservableObject {
+    /// `SelectionModel` and `NoteStore` are both created once, in
+    /// `FloatingPanel`'s init, and live for the app's lifetime — there's no
+    /// ownership cycle to worry about (the store doesn't hold a reference
+    /// back), so a plain strong `let` is simpler than `unowned`/`weak` and
+    /// carries no dangling-reference risk.
+    private let store: NoteStore
+    private var cancellables: Set<AnyCancellable> = []
+
     @Published var selectedIDs: Set<UUID> = []
     @Published var editingID: UUID?
     @Published var editingText: String = ""
+
+    /// The search box's live text. Lives here rather than as `PanelView`
+    /// `@State` because both rendering (`filteredNotes`) and selection
+    /// (`visibleOrder`) need to derive from it, and putting it on the same
+    /// object as the derivation keeps the two from ever reading different
+    /// snapshots of "what's currently filtered".
+    @Published var searchText: String = ""
 
     /// The overlay currently presented over the panel, if any. Lives here
     /// (rather than as `@State` in `PanelView`) so `FloatingPanel` — which
@@ -42,12 +58,6 @@ final class SelectionModel: ObservableObject {
     /// to an empty string before a separate sync pass fills it in).
     @Published var renameText: String = ""
 
-    /// The panel's current flat, filtered, visible order of note IDs
-    /// (ungrouped notes first, then each list's notes, in display order).
-    /// Kept in sync by `PanelView` whenever the underlying/filtered note list
-    /// changes.
-    private(set) var visibleOrder: [UUID] = []
-
     /// The last note explicitly clicked or navigated to; the anchor for
     /// shift-click and shift-arrow range selection.
     private var anchorID: UUID?
@@ -58,18 +68,67 @@ final class SelectionModel: ObservableObject {
     /// range past the anchor's immediate neighbor.
     private var leadID: UUID?
 
-    func updateVisibleOrder(_ order: [UUID]) {
-        visibleOrder = order
-        selectedIDs = selectedIDs.intersection(order)
-        if let anchorID, !order.contains(anchorID) {
+    init(store: NoteStore) {
+        self.store = store
+
+        // Selection/anchor/lead/editing state is pruned when a note stops
+        // *existing* in the store, not when it merely scrolls out of the
+        // current search filter — a note temporarily hidden by a search
+        // shouldn't lose its selection the moment you start typing, and
+        // should still be there (selected) if you clear the search again.
+        // `visibleOrder` itself is computed fresh below, never stored, so
+        // there's no separate copy that can lag a store mutation by a frame.
+        store.$notes
+            .sink { [weak self] notes in
+                self?.pruneToExisting(ids: Set(notes.map(\.id)))
+            }
+            .store(in: &cancellables)
+    }
+
+    private func pruneToExisting(ids: Set<UUID>) {
+        selectedIDs = selectedIDs.intersection(ids)
+        if let anchorID, !ids.contains(anchorID) {
             self.anchorID = nil
         }
-        if let leadID, !order.contains(leadID) {
+        if let leadID, !ids.contains(leadID) {
             self.leadID = nil
         }
-        if let editingID, !order.contains(editingID) {
+        if let editingID, !ids.contains(editingID) {
             endEditing()
         }
+    }
+
+    // MARK: - Visible order derivation
+
+    /// Notes matching `searchText` (case-insensitive substring), or all of
+    /// `store.notes` when the search field is empty. The single source both
+    /// `PanelView`'s rendering and `visibleOrder` below filter from, so the
+    /// two can never diverge.
+    var filteredNotes: [Note] {
+        guard !searchText.isEmpty else { return store.notes }
+        return store.notes.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
+    }
+
+    /// `filteredNotes` scoped to one section, or the ungrouped notes when
+    /// `section` is `nil`.
+    func notes(in section: String?) -> [Note] {
+        filteredNotes.filter { $0.listName == section }
+    }
+
+    /// The flat, filtered, visible order of note IDs, matching the note
+    /// list's display order exactly: just the active section's notes when
+    /// one is focused, otherwise ungrouped notes first, then each section's
+    /// notes. Computed on demand (not cached) so it's always in step with
+    /// the store — no pushed-copy sync to fall a frame behind a mutation.
+    var visibleOrder: [UUID] {
+        if let activeSection = store.activeSection {
+            return notes(in: activeSection).map(\.id)
+        }
+        var ids = notes(in: nil).map(\.id)
+        for sectionName in store.sections {
+            ids += notes(in: sectionName).map(\.id)
+        }
+        return ids
     }
 
     // MARK: - Click handling
