@@ -349,15 +349,12 @@ struct NoteRow: View {
     /// wrapped text, while inline styling (bold/italic/links/code) still
     /// renders via `AttributedString(markdown:, options:
     /// .inlineOnlyPreservingWhitespace)`. Falls back to plain text if that
-    /// fails to parse.
+    /// fails to parse. Memoized in `MarkdownCache` — see its doc comment for
+    /// why: rows are eager `VStack` children, so every row's `body` (and
+    /// this property) re-evaluates on every store change, not just the row
+    /// that actually changed.
     private var renderedText: AttributedString {
-        let flattened = MarkdownBlock.parse(note.text)
-            .map(\.plainText)
-            .joined(separator: "\n")
-        let options = AttributedString.MarkdownParsingOptions(
-            interpretedSyntax: .inlineOnlyPreservingWhitespace
-        )
-        return (try? AttributedString(markdown: flattened, options: options)) ?? AttributedString(flattened)
+        MarkdownCache.collapsedPreview(for: note.text)
     }
 
     // MARK: - Context menu

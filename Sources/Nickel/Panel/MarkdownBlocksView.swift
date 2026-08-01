@@ -103,6 +103,67 @@ enum MarkdownBlock {
     }
 }
 
+/// Caches results of Markdown parsing (the block array, and `NoteRow`'s
+/// collapsed inline preview) keyed by the exact source text. Rows are eager
+/// `VStack` children now, so every store mutation re-evaluates every visible
+/// row's `body` — without this cache that meant re-parsing every note's
+/// Markdown on every keystroke elsewhere in the list, even for notes that
+/// didn't change. `NSCache` needs class values, hence the tiny box types
+/// below, and evicts on its own under memory pressure: an edit changes the
+/// text (the key), so stale entries just age out rather than needing
+/// invalidation.
+enum MarkdownCache {
+    private final class BlocksBox {
+        let blocks: [MarkdownBlock]
+        init(_ blocks: [MarkdownBlock]) { self.blocks = blocks }
+    }
+
+    private final class AttributedStringBox {
+        let value: AttributedString
+        init(_ value: AttributedString) { self.value = value }
+    }
+
+    // 500 notes' worth of parsed output comfortably covers a session's
+    // visible and recently-scrolled rows without holding unbounded history.
+    private static let blocksCache: NSCache<NSString, BlocksBox> = {
+        let cache = NSCache<NSString, BlocksBox>()
+        cache.countLimit = 500
+        return cache
+    }()
+
+    private static let previewCache: NSCache<NSString, AttributedStringBox> = {
+        let cache = NSCache<NSString, AttributedStringBox>()
+        cache.countLimit = 500
+        return cache
+    }()
+
+    /// The parsed block array for `text`, used by `MarkdownBlocksView`.
+    static func blocks(for text: String) -> [MarkdownBlock] {
+        let key = text as NSString
+        if let box = blocksCache.object(forKey: key) { return box.blocks }
+        let blocks = MarkdownBlock.parse(text)
+        blocksCache.setObject(BlocksBox(blocks), forKey: key)
+        return blocks
+    }
+
+    /// The collapsed 3-line preview `AttributedString` for `text`, used by
+    /// `NoteRow.renderedText`: blocks flattened to plain lines (block markers
+    /// stripped) with inline styling still applied.
+    static func collapsedPreview(for text: String) -> AttributedString {
+        let key = text as NSString
+        if let box = previewCache.object(forKey: key) { return box.value }
+        let flattened = blocks(for: text)
+            .map(\.plainText)
+            .joined(separator: "\n")
+        let options = AttributedString.MarkdownParsingOptions(
+            interpretedSyntax: .inlineOnlyPreservingWhitespace
+        )
+        let attributed = (try? AttributedString(markdown: flattened, options: options)) ?? AttributedString(flattened)
+        previewCache.setObject(AttributedStringBox(attributed), forKey: key)
+        return attributed
+    }
+}
+
 /// Renders a note's Markdown source as block-styled SwiftUI views: headings
 /// get bigger/bolder text, list items get a bullet/number gutter, blockquotes
 /// get a rule and muted color, code blocks get a monospaced font. Inline
@@ -112,7 +173,7 @@ struct MarkdownBlocksView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(MarkdownBlock.parse(text).enumerated()), id: \.offset) { _, block in
+            ForEach(Array(MarkdownCache.blocks(for: text).enumerated()), id: \.offset) { _, block in
                 blockView(block)
             }
         }
