@@ -41,15 +41,15 @@ final class PanelActions: ObservableObject {
     // MARK: - Copy
 
     func copy() {
-        PasteboardWriter.copy(notes: selectedNotes)
+        PasteboardWriter.copy(notes: selectedNotes, store: store)
     }
 
     func copyAsList() {
-        PasteboardWriter.copyAsList(notes: selectedNotes)
+        PasteboardWriter.copyAsList(notes: selectedNotes, store: store)
     }
 
     func copyAllAsList() {
-        PasteboardWriter.copyAsList(notes: allVisibleNotes)
+        PasteboardWriter.copyAsList(notes: allVisibleNotes, store: store)
     }
 
     // MARK: - Done / edit / merge / delete
@@ -131,20 +131,20 @@ final class PanelActions: ObservableObject {
 
     // MARK: - Move to list
 
-    func move(toList listName: String?) {
+    func move(toSection sectionName: String?) {
         guard !selection.selectedIDs.isEmpty else { return }
-        store.move(ids: selection.selectedIDs, toList: listName)
+        store.move(ids: selection.selectedIDs, toSection: sectionName)
     }
 
-    /// Creates a new list immediately with a provisional name (Finder's
+    /// Creates a new section immediately with a provisional name (Finder's
     /// "New Folder" pattern), moves the current selection into it, and puts
     /// its section header into inline rename mode so the user can type over
     /// the provisional name right away.
-    func createListWithSelection() {
+    func createSectionWithSelection() {
         guard !selection.selectedIDs.isEmpty else { return }
-        let name = store.uniqueProvisionalListName()
-        store.move(ids: selection.selectedIDs, toList: name)
-        selection.beginRenamingList(name)
+        let name = store.uniqueProvisionalSectionName()
+        store.move(ids: selection.selectedIDs, toSection: name)
+        selection.beginRenamingSection(name)
     }
 
     // MARK: - Right-click

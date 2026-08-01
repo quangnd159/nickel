@@ -202,6 +202,73 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         toggle()
     }
 
+    /// Handles ⌘K (section switcher), ⌘/ (keyboard shortcuts), ⌘F (focus
+    /// search), ⌘N (focus composer), and the attachment-paste ⌘V case by
+    /// overriding `performKeyEquivalent` rather than folding them into
+    /// `keyDown`'s `handle(_:actions:)`: command key-equivalents are routed
+    /// to the focused view first (the search field, composer, or an inline
+    /// edit's field editor), which would otherwise swallow them as normal
+    /// typing. Overriding here, ahead of `super`'s content-view dispatch,
+    /// means all of these always fire regardless of what has focus — e.g.
+    /// ⌘F/⌘N work to jump between fields even while another field already
+    /// has focus, not just when the panel background does.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        let characters = event.charactersIgnoringModifiers?.lowercased()
+
+        if modifiers == [.command], characters == "k" {
+            NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
+            return true
+        }
+        if modifiers == [.command], characters == "/" {
+            NotificationCenter.default.post(name: .nickelToggleShortcuts, object: nil)
+            return true
+        }
+        if modifiers == [.command], characters == "f" {
+            NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
+            return true
+        }
+        if modifiers == [.command], characters == "n" {
+            NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+            return true
+        }
+
+        // ⌘V when the pasteboard has attachable content: redirect to staging
+        // attachments in the composer instead of a normal text paste. This
+        // intercepts ahead of the Edit menu's Paste (which would otherwise
+        // route `paste:` to a focused field editor), which is exactly what we
+        // want for files: Finder's copy puts the *filename* on the pasteboard
+        // as plain text alongside the file URLs, so a plain-text paste of a
+        // copied file would insert its name rather than attach it — the file
+        // URLs must win whenever they're present. Raw images (screenshots)
+        // are attached only when there's no plain text, so copied rich text
+        // that happens to carry an image rendition still pastes as text. No
+        // focus check is needed: pasting files with, say, the search field
+        // focused is meaningless anyway, and staging them in the composer is
+        // still the right outcome.
+        if modifiers == [.command], characters == "v", pasteboardHasAttachableContent() {
+            NotificationCenter.default.post(name: .nickelComposerPaste, object: nil)
+            return true
+        }
+
+        return super.performKeyEquivalent(with: event)
+    }
+
+    /// True when the general pasteboard carries file URLs (regardless of any
+    /// accompanying text — see `performKeyEquivalent`'s ⌘V comment), or image
+    /// data with no plain text.
+    private func pasteboardHasAttachableContent() -> Bool {
+        let pasteboard = NSPasteboard.general
+
+        if pasteboard.canReadObject(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) {
+            return true
+        }
+
+        let hasText = pasteboard.types?.contains(.string) ?? false
+        guard !hasText else { return false }
+        return pasteboard.canReadObject(forClasses: [NSImage.self], options: nil)
+    }
+
     /// Backs the Edit menu's Select All (⌘A) when the panel itself is first
     /// responder (i.e. no text field has focus, in which case its field
     /// editor handles ⌘A as "select all text" instead — the menu item
@@ -218,6 +285,22 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// separate `NSEvent` local monitor, since the panel is already the
     /// natural place these unhandled key events land (see `cancelOperation`
     /// above, which relies on the same responder-chain forwarding).
+    /// Esc while an overlay is presented always closes the overlay, no
+    /// matter what has focus. Intercepted in `sendEvent` (not `keyDown`)
+    /// because a focused field editor otherwise consumes Esc via its
+    /// `cancelOperation` before the event ever reaches the window's
+    /// `keyDown` — e.g. opening the ⌘/ shortcuts card while the composer has
+    /// focus would take two Escapes (one blurring the composer, one closing
+    /// the card). This also covers the section switcher's own field, whose
+    /// `cancelOperation` intercept becomes a never-reached fallback.
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .keyDown, event.keyCode == 53, selectionModel.presentedOverlay != nil {
+            selectionModel.presentedOverlay = nil
+            return
+        }
+        super.sendEvent(event)
+    }
+
     override func keyDown(with event: NSEvent) {
         if let panelActions, !isEditingText, handle(event, actions: panelActions) {
             return
@@ -268,14 +351,6 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         let characters = event.charactersIgnoringModifiers?.lowercased()
         if modifiers == [.command], characters == "c" {
             actions.copy()
-            return true
-        }
-        if modifiers == [.command], characters == "f" {
-            NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
-            return true
-        }
-        if modifiers == [.command], characters == "n" {
-            NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
             return true
         }
         if modifiers == [.command], characters == "e" {

@@ -1,5 +1,14 @@
 import SwiftUI
 import ServiceManagement
+import UniformTypeIdentifiers
+
+/// Posted by `FloatingPanel` when ⌘V is pressed and the pasteboard holds
+/// file/image content but no plain text, so `PanelView` can stage those as
+/// pending composer attachments instead of the paste falling through as a
+/// normal (empty) text paste.
+extension Notification.Name {
+    static let nickelComposerPaste = Notification.Name("NickelComposerPaste")
+}
 
 struct VisualEffectBackground: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .hudWindow
@@ -17,12 +26,34 @@ struct VisualEffectBackground: NSViewRepresentable {
     }
 }
 
+/// A file/image the user has picked, dropped, or pasted but not yet
+/// committed to a note — shown as a chip above the composer's text field.
+/// `sourceURL` may point at the original file (paperclip picker, drag) or a
+/// temp file Nickel itself wrote (a pasted/dropped raw image payload).
+struct StagedAttachment: Identifiable {
+    let id = UUID()
+    var sourceURL: URL
+    var filename: String
+    var contentType: String
+}
+
 struct PanelView: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
     @State private var searchText = ""
     @State private var composerText = ""
+    @State private var pendingAttachments: [StagedAttachment] = []
+    @State private var isComposerDropTargeted = false
+    /// The transient "Attached N file(s)" confirmation shown above the
+    /// composer after a drop, paperclip pick, or ⌘V paste stages new
+    /// attachments; `nil` when nothing is showing. See `showAttachmentToast`.
+    @State private var attachmentToast: String?
+    /// Cancelled and rescheduled by `showAttachmentToast` so back-to-back
+    /// stagings (e.g. dropping a few files right after pasting one) restart
+    /// the auto-dismiss timer instead of an old one hiding the new toast
+    /// early.
+    @State private var attachmentToastDismissTask: DispatchWorkItem?
 
     var body: some View {
         ZStack {
@@ -43,7 +74,11 @@ struct PanelView: View {
                 topBar
                     .padding(.bottom, 12)
 
-                if store.notes.isEmpty && searchText.isEmpty {
+                // The global empty state only applies in Show All: with an
+                // active section, the pinned header + per-section hint must
+                // show even when there are no notes anywhere yet (e.g. the
+                // user's very first action was typing "# Name").
+                if store.notes.isEmpty && searchText.isEmpty && store.activeSection == nil {
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -54,10 +89,42 @@ struct PanelView: View {
                     .padding(.top, 10)
             }
             .padding(16)
+
+            // Overlays: at most one presented at a time (see
+            // `SelectionModel.presentedOverlay`), each dimming/covering
+            // everything above. A quick fade+scale reads as "instant" without
+            // being an abrupt cut.
+            if selection.presentedOverlay == .sectionSwitcher {
+                SectionSwitcher()
+                    .transition(sectionSwitchTransition)
+            }
+
+            if selection.presentedOverlay == .shortcuts {
+                ShortcutsOverlay()
+                    .transition(sectionSwitchTransition)
+            }
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onAppear { selection.updateVisibleOrder(flatVisibleIDs) }
         .onChange(of: flatVisibleIDs) { _, newValue in selection.updateVisibleOrder(newValue) }
+        .onReceive(NotificationCenter.default.publisher(for: .nickelToggleSectionSwitcher)) { _ in
+            toggleOverlay(.sectionSwitcher)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .nickelToggleShortcuts)) { _ in
+            toggleOverlay(.shortcuts)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .nickelComposerPaste)) { _ in
+            stagePasteboardAttachments()
+        }
+    }
+
+    /// Opens `overlay`, or closes it if it's already the one presented
+    /// (⌘K/⌘/ both toggle); opening either one always replaces the other, so
+    /// only one is ever presented at a time.
+    private func toggleOverlay(_ overlay: PanelOverlay) {
+        withAnimation(.easeOut(duration: 0.12)) {
+            selection.presentedOverlay = (selection.presentedOverlay == overlay) ? nil : overlay
+        }
     }
 
     // MARK: - Top bar
@@ -80,11 +147,42 @@ struct PanelView: View {
             )
 
             Menu {
+                Section("Section") {
+                    Toggle("Show All", isOn: Binding(
+                        get: { store.activeSection == nil },
+                        set: { isOn in if isOn { store.setActiveSection(nil) } }
+                    ))
+
+                    ForEach(store.sections, id: \.self) { sectionName in
+                        Toggle(sectionName, isOn: Binding(
+                            get: { store.activeSection == sectionName },
+                            set: { isOn in if isOn { store.setActiveSection(sectionName) } }
+                        ))
+                    }
+
+                    Button("New Section") { createAndRenameNewSection() }
+                }
+
+                Divider()
+
+                Button("Clear Done") {
+                    store.clearDone()
+                }
+                .disabled(!hasDoneNotesInScope)
+
+                Button("Keyboard Shortcuts") {
+                    selection.presentedOverlay = .shortcuts
+                }
+
+                Divider()
+
                 Button("Copy All as List") {
                     actions.copyAllAsList()
                 }
 
-                Divider()
+                Button("Reveal Notes in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([store.fileURL])
+                }
 
                 Toggle("Launch at Login", isOn: Binding(
                     get: { LaunchAtLogin.isEnabled },
@@ -120,60 +218,111 @@ struct PanelView: View {
         filteredNotes.filter { $0.listName == nil }
     }
 
-    private func notes(in listName: String) -> [Note] {
-        filteredNotes.filter { $0.listName == listName }
+    private func notes(in sectionName: String) -> [Note] {
+        filteredNotes.filter { $0.listName == sectionName }
     }
 
-    /// The flat, filtered, visible order of note IDs (ungrouped first, then
-    /// each list's notes), matching `noteList`'s display order exactly.
+    /// The flat, filtered, visible order of note IDs, matching `noteList`'s
+    /// display order exactly: just the active section's notes when one is
+    /// focused, otherwise ungrouped notes first, then each section's notes.
     /// `SelectionModel` uses this for range selection and arrow-key nav.
     private var flatVisibleIDs: [UUID] {
+        if let activeSection = store.activeSection {
+            return notes(in: activeSection).map(\.id)
+        }
         var ids = ungroupedNotes.map(\.id)
-        for listName in store.listNames {
-            ids += notes(in: listName).map(\.id)
+        for sectionName in store.sections {
+            ids += notes(in: sectionName).map(\.id)
         }
         return ids
     }
 
     private var noteList: some View {
-        GeometryReader { geometry in
-            ScrollView {
-                ZStack(alignment: .top) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .onTapGesture { handleBackgroundClick() }
+        VStack(alignment: .leading, spacing: 0) {
+            // The active section's header is pinned above the scroll
+            // content (rather than inline, like the "Show All" headers
+            // below) so it stays visible even when the section is empty.
+            if let activeSection = store.activeSection {
+                sectionHeader(activeSection)
+                    .padding(.bottom, 12)
+                    .transition(sectionSwitchTransition)
+            }
 
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(ungroupedNotes) { note in
-                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                .transition(rowTransition)
-                        }
+            GeometryReader { geometry in
+                ScrollView {
+                    ZStack(alignment: .top) {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { handleBackgroundClick() }
 
-                        ForEach(store.listNames, id: \.self) { listName in
-                            let items = notes(in: listName)
-                            if !items.isEmpty {
-                                sectionHeader(listName)
-                                    .padding(.top, 12)
-                                    .transition(rowTransition)
-
-                                ForEach(items) { note in
+                        if let activeSection = store.activeSection {
+                            let items = notes(in: activeSection)
+                            if items.isEmpty {
+                                emptySectionHint
+                                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                                    .transition(sectionSwitchTransition)
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 10) {
+                                    ForEach(items) { note in
+                                        NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                            .transition(rowTransition)
+                                    }
+                                }
+                                .transition(sectionSwitchTransition)
+                                .animation(rowSpring, value: flatVisibleIDs)
+                                .animation(rowSpring, value: selection.expandedIDs)
+                            }
+                        } else {
+                            LazyVStack(alignment: .leading, spacing: 10) {
+                                ForEach(ungroupedNotes) { note in
                                     NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                         .transition(rowTransition)
                                 }
+
+                                ForEach(store.sections, id: \.self) { sectionName in
+                                    let items = notes(in: sectionName)
+                                    if !items.isEmpty {
+                                        sectionHeader(sectionName)
+                                            .padding(.top, 12)
+                                            .transition(rowTransition)
+
+                                        ForEach(items) { note in
+                                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                                .transition(rowTransition)
+                                        }
+                                    }
+                                }
                             }
+                            .transition(sectionSwitchTransition)
+                            .animation(rowSpring, value: flatVisibleIDs)
+                            // Expand/collapse changes a row's height without
+                            // adding or removing it from `flatVisibleIDs`, so
+                            // it needs its own `.animation` keyed off
+                            // `expandedIDs` to pick up the same spring.
+                            .animation(rowSpring, value: selection.expandedIDs)
                         }
                     }
-                    .animation(rowSpring, value: flatVisibleIDs)
-                    // Expand/collapse changes a row's height without adding
-                    // or removing it from `flatVisibleIDs`, so it needs its
-                    // own `.animation` keyed off `expandedIDs` to pick up the
-                    // same spring.
-                    .animation(rowSpring, value: selection.expandedIDs)
+                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
                 }
-                .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
+        // Drives both the pinned header's appearance/disappearance and the
+        // swap between the focused-section view and "Show All" with the same
+        // spring used for row insert/delete/move, so switching sections
+        // (menu, ⌘K, or "# Name") animates instead of hard-cutting. The
+        // composer/search bar don't move: `noteList` already fills a fixed
+        // slice of the outer `VStack`, so the header's appearance only
+        // resizes the `GeometryReader` below it, not the panel around it.
+        .animation(rowSpring, value: store.activeSection)
+    }
+
+    /// Shown below the pinned header when the active section has no notes
+    /// yet (empty, but distinct from "no notes anywhere" — see `emptyState`).
+    private var emptySectionHint: some View {
+        Text("Notes you capture will be saved here")
+            .font(.system(size: 12))
+            .foregroundStyle(.tertiary)
     }
 
     /// Gentle spring used for note insert/delete/move and section
@@ -187,8 +336,15 @@ struct PanelView: View {
         .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
     }
 
-    private func sectionHeader(_ listName: String) -> some View {
-        let isRenaming = selection.renamingListName == listName
+    /// Used for the pinned header and the list content it swaps with when
+    /// `store.activeSection` changes, subtler than `rowTransition` since it's
+    /// covering a whole-view swap rather than a single row.
+    private var sectionSwitchTransition: AnyTransition {
+        .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
+    }
+
+    private func sectionHeader(_ sectionName: String) -> some View {
+        let isRenaming = selection.renamingSectionName == sectionName
 
         return HStack(spacing: 8) {
             if isRenaming {
@@ -206,8 +362,8 @@ struct PanelView: View {
                             get: { selection.renameText },
                             set: { selection.renameText = $0 }
                         ),
-                        onCommit: { commitHeaderRename(from: listName) },
-                        onCancel: { selection.endRenamingList() }
+                        onCommit: { commitHeaderRename(from: sectionName) },
+                        onCancel: { selection.endRenamingSection() }
                     )
                     .font(.system(size: 11, weight: .semibold))
                     .frame(maxWidth: .infinity)
@@ -220,13 +376,13 @@ struct PanelView: View {
                         .fill(Color(nsColor: .textBackgroundColor))
                 )
             } else {
-                Text(listName.uppercased())
+                Text(sectionName.uppercased())
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.8)
                     .foregroundStyle(.secondary)
                     .fixedSize()
                     .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { selection.beginRenamingList(listName) }
+                    .onTapGesture(count: 2) { selection.beginRenamingSection(sectionName) }
             }
 
             Rectangle()
@@ -234,8 +390,8 @@ struct PanelView: View {
                 .frame(height: 1)
         }
         .contextMenu {
-            Button("Rename List") { selection.beginRenamingList(listName) }
-            Button("Dissolve List") { dissolveList(listName) }
+            Button("Rename Section") { selection.beginRenamingSection(sectionName) }
+            Button("Dissolve Section") { store.dissolveSection(sectionName) }
         }
     }
 
@@ -257,16 +413,28 @@ struct PanelView: View {
     }
 
     private func commitHeaderRename(from oldName: String) {
-        store.renameList(from: oldName, to: selection.renameText)
-        selection.endRenamingList()
+        store.renameSection(from: oldName, to: selection.renameText)
+        selection.endRenamingSection()
     }
 
-    /// Notes survive; the list grouping disappears (all matching notes'
-    /// `listName` is cleared). Uses the full (unfiltered) note set so a
-    /// search filter doesn't leave stray notes behind in the dissolved list.
-    private func dissolveList(_ listName: String) {
-        let ids = Set(store.notes.filter { $0.listName == listName }.map(\.id))
-        store.move(ids: ids, toList: nil)
+    /// Whether there's at least one done note in the current scope (the
+    /// active section if one is set, otherwise anywhere) — used to disable
+    /// the ⋯ menu's "Clear Done" when there's nothing for it to do.
+    private var hasDoneNotesInScope: Bool {
+        if let activeSection = store.activeSection {
+            return store.notes.contains { $0.isDone && $0.listName == activeSection }
+        }
+        return store.notes.contains(where: \.isDone)
+    }
+
+    /// The ⋯ menu's "New Section": creates a provisional section (Finder's
+    /// "New Folder" pattern) — which also switches to it, via
+    /// `createSection` — and puts its header into inline rename mode so the
+    /// user can type over the provisional name right away.
+    private func createAndRenameNewSection() {
+        let name = store.uniqueProvisionalSectionName()
+        store.createSection(named: name)
+        selection.beginRenamingSection(name)
     }
 
     // MARK: - Empty state
@@ -287,21 +455,311 @@ struct PanelView: View {
     // MARK: - Composer
 
     private var composer: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: "circle")
-                .font(.system(size: 19, weight: .light))
-                .foregroundStyle(.quaternary)
-                .frame(height: 19)
+        VStack(alignment: .leading, spacing: 8) {
+            if !pendingAttachments.isEmpty {
+                pendingAttachmentsRow
+            }
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "circle")
+                    .font(.system(size: 19, weight: .light))
+                    .foregroundStyle(.quaternary)
+                    .frame(height: 19)
 
-            ComposerField(text: $composerText, onCommit: commitComposer)
-                .font(.system(size: 14))
+                ComposerField(text: $composerText, onCommit: commitComposer)
+                    .font(.system(size: 14))
+
+                Button(action: presentAttachmentPicker) {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        // Dimmed rather than removed while a drag is targeted, so the
+        // "Drop to attach" pill below floats over the composer's normal
+        // contents (Copper's look) instead of replacing them — the card
+        // never resizes as a drag enters or leaves.
+        .opacity(isComposerDropTargeted ? 0.35 : 1)
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
+                .fill(isComposerDropTargeted ? Color.accentColor.opacity(0.08) : Color(nsColor: .textBackgroundColor))
         )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                .opacity(isComposerDropTargeted ? 1 : 0)
+        )
+        .overlay {
+            if isComposerDropTargeted {
+                dropToAttachPill
+            }
+        }
+        .onDrop(of: composerDropTypes, isTargeted: $isComposerDropTargeted, perform: handleComposerDrop)
+        .overlay(alignment: .top) {
+            if let attachmentToast {
+                attachmentToastView(attachmentToast)
+                    .offset(y: -34)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+    }
+
+    /// Types accepted by the composer's drop target: real files, raw
+    /// image payloads with no backing file (screenshots dragged straight off
+    /// a capture tool), and plain text (which is inserted into the composer
+    /// text, not staged as an attachment — see `handleComposerDrop`).
+    private var composerDropTypes: [UTType] {
+        [.fileURL, .image, .png, .tiff, .utf8PlainText, .text]
+    }
+
+    /// Floated over the composer's (dimmed, still-visible) contents while a
+    /// drag is targeted at it, mirroring Copper's "Drop to attach" pill.
+    private var dropToAttachPill: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.down.doc")
+            Text("Drop to attach")
+        }
+        .font(.system(size: 13, weight: .medium))
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(
+            Capsule().fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        )
+    }
+
+    /// The "Attached N file(s)" confirmation pill, floated just above the
+    /// composer via its `.overlay(alignment: .top)`.
+    private func attachmentToastView(_ text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+            Text(text)
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(
+            Capsule().fill(.regularMaterial)
+                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        )
+    }
+
+    /// The staged-attachment chips shown above the composer's text field.
+    private var pendingAttachmentsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(pendingAttachments) { staged in
+                    pendingAttachmentChip(staged)
+                }
+            }
+        }
+    }
+
+    private func pendingAttachmentChip(_ staged: StagedAttachment) -> some View {
+        HStack(spacing: 6) {
+            AttachmentThumbnailView(fileURL: staged.sourceURL, contentType: staged.contentType, size: 24)
+                .frame(width: 24, height: 24)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            Text(staged.filename)
+                .font(.system(size: 11))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 120, alignment: .leading)
+
+            Button(action: { pendingAttachments.removeAll { $0.id == staged.id } }) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.quaternary)
+        )
+    }
+
+    /// The composer's paperclip button: opens a standard file picker whose
+    /// chosen files become pending attachments. The panel is a
+    /// nonactivating panel, so `NSOpenPanel` needs the app explicitly
+    /// activated first or it can appear behind other windows; running it
+    /// modally (rather than as a sheet) keeps this a simple, synchronous
+    /// call like the rest of the panel's AppKit interop.
+    private func presentAttachmentPicker() {
+        NSApp.activate(ignoringOtherApps: true)
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK else { return }
+        guard !panel.urls.isEmpty else { return }
+        for url in panel.urls {
+            pendingAttachments.append(StagedAttachment(sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
+        }
+        showAttachmentToast(count: panel.urls.count)
+    }
+
+    /// ⌘V while the pasteboard has attachable content (file URLs always win
+    /// over accompanying text; raw images only when there's no text — see
+    /// `FloatingPanel`'s `.nickelComposerPaste` post): stages file URLs
+    /// directly, and a raw image payload (e.g. a screenshot) after writing it
+    /// to a temp "Image.png" file so it can be copied like any other source
+    /// file once the note commits.
+    private func stagePasteboardAttachments() {
+        let pasteboard = NSPasteboard.general
+
+        if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
+            for url in urls {
+                pendingAttachments.append(StagedAttachment(sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
+            }
+            showAttachmentToast(count: urls.count)
+            return
+        }
+
+        if let images = pasteboard.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage],
+           let image = images.first,
+           let tempURL = Self.writeTemporaryPNG(image) {
+            pendingAttachments.append(StagedAttachment(sourceURL: tempURL, filename: "Image.png", contentType: UTType.png.identifier))
+            showAttachmentToast(count: 1)
+        }
+    }
+
+    /// Handles a drag onto the composer card. Plain text is inserted into
+    /// the composer's text (native text-field drop behavior), leaving Return
+    /// as the single "commit" gesture; files and images are staged as
+    /// pending attachments exactly like the paperclip picker and ⌘V paste,
+    /// leaving `composerText` untouched until the user commits with Return.
+    private func handleComposerDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty else { return false }
+
+        if providers.count == 1, let provider = providers.first,
+           provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier),
+           !provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            provider.loadObject(ofClass: NSString.self) { object, _ in
+                guard let text = object as? String, !text.isEmpty else { return }
+                DispatchQueue.main.async {
+                    composerText = composerText.isEmpty ? text : composerText + "\n" + text
+                    NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+                }
+            }
+            return true
+        }
+
+        let group = DispatchGroup()
+        var collected: [(sourceURL: URL, filename: String, contentType: String)] = []
+        let collectedLock = NSLock()
+
+        for provider in providers {
+            group.enter()
+            loadDroppedAttachment(from: provider) { input in
+                if let input {
+                    collectedLock.lock()
+                    collected.append(input)
+                    collectedLock.unlock()
+                }
+                group.leave()
+            }
+        }
+
+        group.notify(queue: .main) {
+            guard !collected.isEmpty else { return }
+            for input in collected {
+                pendingAttachments.append(StagedAttachment(sourceURL: input.sourceURL, filename: input.filename, contentType: input.contentType))
+            }
+            showAttachmentToast(count: collected.count)
+        }
+        return true
+    }
+
+    /// Shows (or restarts) the "Attached N file(s)" toast above the
+    /// composer. The dismiss is a cancellable `DispatchWorkItem` rather than
+    /// a fixed `Task.sleep` so a second staging while the toast is still up
+    /// (e.g. dropping more files right after a paste) restarts the ~1.8s
+    /// countdown instead of an earlier dismiss cutting the new toast short.
+    private func showAttachmentToast(count: Int) {
+        attachmentToastDismissTask?.cancel()
+
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+            attachmentToast = count == 1 ? "Attached 1 file" : "Attached \(count) files"
+        }
+
+        let dismiss = DispatchWorkItem {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                attachmentToast = nil
+            }
+        }
+        attachmentToastDismissTask = dismiss
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: dismiss)
+    }
+
+    /// Resolves one dropped item to a copyable source file: a real file URL
+    /// is used as-is; a raw image payload with no backing file is written to
+    /// a temp "Image.png" first.
+    private func loadDroppedAttachment(
+        from provider: NSItemProvider,
+        completion: @escaping ((sourceURL: URL, filename: String, contentType: String)?) -> Void
+    ) {
+        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else {
+                    completion(nil)
+                    return
+                }
+                completion((sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
+            }
+            return
+        }
+
+        let imageTypes: [UTType] = [.png, .tiff, .image]
+        guard let imageType = imageTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
+            completion(nil)
+            return
+        }
+        provider.loadDataRepresentation(forTypeIdentifier: imageType.identifier) { data, _ in
+            guard let data, let image = NSImage(data: data), let tempURL = Self.writeTemporaryPNG(image) else {
+                completion(nil)
+                return
+            }
+            completion((sourceURL: tempURL, filename: "Image.png", contentType: UTType.png.identifier))
+        }
+    }
+
+    /// Best-effort UTType identifier for a file on disk, falling back to
+    /// generic `public.data` if the filesystem can't say (e.g. the file
+    /// vanished between picking/dropping it and reading its metadata).
+    private func contentType(of url: URL) -> String {
+        (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.identifier ?? UTType.data.identifier
+    }
+
+    /// Writes `image` out as a standalone PNG in a fresh temp directory (so
+    /// concurrent drops/pastes never collide on the same "Image.png" name),
+    /// for raw clipboard/drag image payloads that have no backing file of
+    /// their own to copy into the note's attachments directory.
+    private static func writeTemporaryPNG(_ image: NSImage) -> URL? {
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let fileURL = directory.appendingPathComponent("Image.png")
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try pngData.write(to: fileURL)
+            return fileURL
+        } catch {
+            NSLog("PanelView: failed to write temporary image: \(error)")
+            return nil
+        }
     }
 
     /// Esc in the search field: if it has text, clear it (and keep focus so
@@ -316,10 +774,47 @@ struct PanelView: View {
         }
     }
 
+    /// Return in the composer: commits its text plus any staged attachments
+    /// as a new note. Either alone is enough (an attachment-only note, or —
+    /// as before this feature — plain text), so only both being empty is a
+    /// no-op.
     private func commitComposer() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
-        store.add(text: text, sourceApp: nil)
+        guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
+
+        // The "# Name" section shortcut only makes sense for a bare text
+        // note; with attachments staged, "#foo" is just note text.
+        if pendingAttachments.isEmpty, let command = composerSectionCommandName(text) {
+            if let name = command {
+                store.createSection(named: name)
+                composerText = ""
+            }
+            // Else: a bare "#" or "# " with nothing typed after it yet — a
+            // no-op, leaving the text in place so the user can keep typing.
+            return
+        }
+
+        if pendingAttachments.isEmpty {
+            store.add(text: text, sourceApp: nil)
+        } else {
+            let attachments = pendingAttachments.map { (sourceURL: $0.sourceURL, filename: $0.filename, contentType: $0.contentType) }
+            store.add(text: text, attachments: attachments, sourceApp: nil)
+            pendingAttachments = []
+        }
         composerText = ""
+    }
+
+    /// Recognizes the composer's "# Name" section shortcut. Single line
+    /// only: text containing a newline is always a normal note. Returns:
+    /// - `nil` if `text` isn't a section command at all (a normal note,
+    ///   including a "#hashtag" with no separating space);
+    /// - `.some(nil)` for a bare "#"/"# " with no name yet (a no-op);
+    /// - `.some(name)` for "# Name" (create-or-switch to `name`).
+    private func composerSectionCommandName(_ text: String) -> String?? {
+        guard !text.contains("\n"), text.hasPrefix("#") else { return nil }
+        let rest = text.dropFirst()
+        guard rest.isEmpty || rest.hasPrefix(" ") else { return nil }
+        let name = rest.trimmingCharacters(in: .whitespaces)
+        return .some(name.isEmpty ? nil : name)
     }
 }

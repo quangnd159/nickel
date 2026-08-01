@@ -1,5 +1,12 @@
 import Foundation
 
+/// A panel-wide modal overlay: the ⌘K section switcher or the ⌘/ keyboard
+/// shortcuts card. At most one is presented at a time.
+enum PanelOverlay {
+    case sectionSwitcher
+    case shortcuts
+}
+
 /// Shared selection/editing state for the note list, plus the click and
 /// keyboard-navigation logic that operates over the panel's current flat
 /// visible (filtered, grouped) order of notes.
@@ -8,20 +15,29 @@ final class SelectionModel: ObservableObject {
     @Published var editingID: UUID?
     @Published var editingText: String = ""
 
+    /// The overlay currently presented over the panel, if any. Lives here
+    /// (rather than as `@State` in `PanelView`) so `FloatingPanel` — which
+    /// owns this object — can consult it directly from its `keyDown`
+    /// override and route Esc to closing the overlay instead of the panel's
+    /// own selection-clear/hide handling. `PanelView` sets it in response to
+    /// the `.nickelToggleSectionSwitcher` / `.nickelToggleShortcuts`
+    /// notifications posted by `FloatingPanel.performKeyEquivalent`.
+    @Published var presentedOverlay: PanelOverlay?
+
     /// Notes currently showing full (untruncated) text in the list, rather
     /// than the default 3-line clamp — session-only (not persisted to the
     /// store), toggled via the context menu's "Expand"/"Collapse" or ⌘E.
     @Published var expandedIDs: Set<UUID> = []
 
-    /// The list name currently in inline section-header rename mode, if any
-    /// (set by `PanelActions.createListWithSelection()` for a just-created
-    /// list, or by double-clicking/context-menuing a header in
-    /// `PanelView`).
-    @Published var renamingListName: String?
+    /// The section name currently in inline section-header rename mode, if
+    /// any (set by `PanelActions.createSectionWithSelection()` for a
+    /// just-created section, by the ⋯ menu's "New Section", or by
+    /// double-clicking/context-menuing a header in `PanelView`).
+    @Published var renamingSectionName: String?
 
     /// Live edit buffer for whichever section header is currently in inline
-    /// rename mode. Set together with `renamingListName` by
-    /// `beginRenamingList(_:)` so the two are never observed out of sync
+    /// rename mode. Set together with `renamingSectionName` by
+    /// `beginRenamingSection(_:)` so the two are never observed out of sync
     /// (avoids a one-frame window where `HeaderRenameField` is created bound
     /// to an empty string before a separate sync pass fills it in).
     @Published var renameText: String = ""
@@ -148,18 +164,18 @@ final class SelectionModel: ObservableObject {
         editingText = ""
     }
 
-    // MARK: - List rename
+    // MARK: - Section rename
 
     /// Enters inline rename mode for a section header, seeding the edit
-    /// buffer *before* flipping on `renamingListName` so the field is never
-    /// rendered with stale/empty text.
-    func beginRenamingList(_ name: String) {
+    /// buffer *before* flipping on `renamingSectionName` so the field is
+    /// never rendered with stale/empty text.
+    func beginRenamingSection(_ name: String) {
         renameText = name
-        renamingListName = name
+        renamingSectionName = name
     }
 
-    func endRenamingList() {
-        renamingListName = nil
+    func endRenamingSection() {
+        renamingSectionName = nil
         renameText = ""
     }
 

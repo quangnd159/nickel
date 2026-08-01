@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// A single note card: circle checkbox + note text (or an inline editor),
 /// styled to match the Copper-style panel (white/dark-gray rounded card,
@@ -18,8 +19,16 @@ struct NoteRow: View {
     @EnvironmentObject private var actions: PanelActions
     @FocusState private var editFocus: Bool
 
+    /// Frames (in the row's own coordinate space, see `attachmentsSpace`) of
+    /// each rendered attachment thumbnail/card, kept live via
+    /// `AttachmentFramesPreferenceKey`. Used to tell whether a double-click
+    /// landed on an attachment (open the file) rather than elsewhere on the
+    /// card (begin editing).
+    @State private var attachmentFrames: [AttachmentFrame] = []
+
     private var isSelected: Bool { selection.selectedIDs.contains(note.id) }
     private var isEditing: Bool { selection.editingID == note.id }
+    private static let attachmentsSpace = "NoteRow.attachments"
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
@@ -50,6 +59,8 @@ struct NoteRow: View {
                 .strokeBorder(Color.accentColor, lineWidth: 2)
                 .opacity(isSelected ? 1 : 0)
         )
+        .coordinateSpace(name: Self.attachmentsSpace)
+        .onPreferenceChange(AttachmentFramesPreferenceKey.self) { attachmentFrames = $0 }
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
         // Row-wide click target: clicking anywhere on the card (including its
         // padding) selects it. `simultaneousGesture` (rather than a plain,
@@ -104,26 +115,102 @@ struct NoteRow: View {
 
     @ViewBuilder
     private var displayText: some View {
-        if isExpanded {
-            // Full Markdown rendering: headings, lists, blockquotes and code
-            // blocks get their own block styling; nothing is line-clamped.
-            MarkdownBlocksView(text: note.text)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .opacity(note.isDone ? 0.5 : 1)
-        } else {
-            // Collapsed 3-line preview: flattened to plain lines (block
-            // markers like "#"/"-"/">" stripped) with inline styling still
-            // applied, so the clamp behaves like simple wrapped text.
-            Text(renderedText)
-                .font(.system(size: 14))
-                .lineSpacing(2)
-                .foregroundStyle(.primary)
-                .lineLimit(3)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .opacity(note.isDone ? 0.5 : 1)
+        // An attachment-only note (no text) skips the text view entirely
+        // rather than rendering an empty `Text`, which would otherwise leave
+        // an awkward blank line above the attachments.
+        VStack(alignment: .leading, spacing: note.text.isEmpty ? 0 : 8) {
+            if !note.text.isEmpty {
+                if isExpanded {
+                    // Full Markdown rendering: headings, lists, blockquotes
+                    // and code blocks get their own block styling; nothing is
+                    // line-clamped.
+                    MarkdownBlocksView(text: note.text)
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .opacity(note.isDone ? 0.5 : 1)
+                } else {
+                    // Collapsed 3-line preview: flattened to plain lines
+                    // (block markers like "#"/"-"/">" stripped) with inline
+                    // styling still applied, so the clamp behaves like simple
+                    // wrapped text.
+                    Text(renderedText)
+                        .font(.system(size: 14))
+                        .lineSpacing(2)
+                        .foregroundStyle(.primary)
+                        .lineLimit(3)
+                        .truncationMode(.tail)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .opacity(note.isDone ? 0.5 : 1)
+                }
+            }
+
+            if !note.attachments.isEmpty {
+                attachmentsView
+            }
         }
+    }
+
+    // MARK: - Attachments
+
+    /// A single image attachment gets one big rounded thumbnail; anything
+    /// else (a non-image file, or more than one attachment) renders as a
+    /// stack of compact icon + filename cards.
+    @ViewBuilder
+    private var attachmentsView: some View {
+        if note.attachments.count == 1, isImage(note.attachments[0]) {
+            imageThumbnail(note.attachments[0])
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(note.attachments) { attachment in
+                    attachmentCard(attachment)
+                }
+            }
+        }
+    }
+
+    private func isImage(_ attachment: Attachment) -> Bool {
+        UTType(attachment.contentType)?.conforms(to: .image) ?? false
+    }
+
+    private func imageThumbnail(_ attachment: Attachment) -> some View {
+        AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 64)
+            .frame(maxHeight: 64)
+            .fixedSize(horizontal: true, vertical: false)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .strokeBorder(.quaternary, lineWidth: 1)
+            )
+            .reportingAttachmentFrame(id: attachment.id, in: Self.attachmentsSpace)
+    }
+
+    private func attachmentCard(_ attachment: Attachment) -> some View {
+        HStack(spacing: 8) {
+            AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 28)
+                .frame(width: 28, height: 28)
+                .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+
+            Text(attachment.filename)
+                .font(.system(size: 11))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(.quaternary)
+        )
+        .reportingAttachmentFrame(id: attachment.id, in: Self.attachmentsSpace)
+    }
+
+    /// Opens `attachment`'s file in its default app (double-click only —
+    /// see `handleDoubleClick`). No `QLPreviewPanel`: that's a
+    /// nonactivating-panel focus headache this app doesn't need.
+    private func openAttachment(id: UUID) {
+        guard let attachment = note.attachments.first(where: { $0.id == id }) else { return }
+        NSWorkspace.shared.open(store.url(for: attachment, in: note))
     }
 
     // MARK: - Click handling
@@ -154,6 +241,15 @@ struct NoteRow: View {
     private func handleDoubleClick(at location: CGPoint) {
         guard !isInCheckboxColumn(location) else { return }
         actions.commitActiveEditIfAny()
+        // Double-clicking an attachment thumbnail/card opens the file
+        // instead of entering edit mode — checked by hit-testing the tracked
+        // frames rather than a gesture on the attachment view itself, so a
+        // single click there still falls through to this row's own
+        // selection handling untouched.
+        if let hitID = attachmentFrames.first(where: { $0.frame.contains(location) })?.id {
+            openAttachment(id: hitID)
+            return
+        }
         guard !isEditing else { return }
         let flags = NSEvent.modifierFlags
         guard !flags.contains(.command), !flags.contains(.shift) else { return }
@@ -262,18 +358,52 @@ struct NoteRow: View {
             .keyboardShortcut("m", modifiers: [.command, .shift])
             .disabled(selection.selectedIDs.count < 2)
 
-        Menu("Move to") {
-            ForEach(store.listNames, id: \.self) { listName in
-                Button(listName) { actions.move(toList: listName) }
+        Menu("Move to Section") {
+            ForEach(store.sections, id: \.self) { sectionName in
+                Button(sectionName) { actions.move(toSection: sectionName) }
             }
-            Button("No List") { actions.move(toList: nil) }
+            Button("No Section") { actions.move(toSection: nil) }
             Divider()
-            Button("New List…") { actions.createListWithSelection() }
+            Button("New Section with Selection") { actions.createSectionWithSelection() }
         }
 
         Divider()
 
         Button("Delete") { actions.delete() }
             .keyboardShortcut(.delete, modifiers: [])
+    }
+}
+
+// MARK: - Attachment hit-testing
+
+/// One attachment's on-screen frame, reported in `NoteRow.attachmentsSpace`
+/// so `handleDoubleClick` can tell whether a click landed on it.
+private struct AttachmentFrame: Equatable {
+    let id: UUID
+    let frame: CGRect
+}
+
+private struct AttachmentFramesPreferenceKey: PreferenceKey {
+    static var defaultValue: [AttachmentFrame] = []
+    static func reduce(value: inout [AttachmentFrame], nextValue: () -> [AttachmentFrame]) {
+        value += nextValue()
+    }
+}
+
+private extension View {
+    /// Publishes this view's frame (in the named coordinate space) as an
+    /// `AttachmentFramesPreferenceKey` entry for `id`, so an ancestor can
+    /// hit-test clicks against it without the attachment view needing its
+    /// own gesture recognizer (which would otherwise double-fire alongside
+    /// the row's own click handling — see `NoteRow.handleDoubleClick`).
+    func reportingAttachmentFrame(id: UUID, in coordinateSpace: String) -> some View {
+        background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: AttachmentFramesPreferenceKey.self,
+                    value: [AttachmentFrame(id: id, frame: geometry.frame(in: .named(coordinateSpace)))]
+                )
+            }
+        )
     }
 }
