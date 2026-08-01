@@ -450,57 +450,41 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         firstResponder is NSTextView
     }
 
-    /// Returns `true` if the event was handled as a panel shortcut.
+    /// Returns `true` if the event was handled as a panel shortcut. Matching
+    /// itself lives in the `PanelShortcuts` table (see that file for why);
+    /// this switch is only the dispatch, plus the event-context decisions
+    /// the table deliberately leaves to the panel: shift-extend on the
+    /// arrows, and Escape's clear-selection-else-toggle branch.
     private func handle(_ event: NSEvent, actions: PanelActions) -> Bool {
+        guard let command = PanelShortcuts.command(for: event) else { return false }
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
 
-        switch event.keyCode {
-        case 125: // Down arrow
+        switch command {
+        case .moveDown:
             actions.selection.moveSelection(direction: 1, extend: modifiers == [.shift])
-            return true
-        case 126: // Up arrow
+        case .moveUp:
             actions.selection.moveSelection(direction: -1, extend: modifiers == [.shift])
-            return true
-        case 36: // Return
+        case .edit:
             actions.startEditingIfSingleSelected()
-            return true
-        case 49: // Space
+        case .toggleDone:
             actions.toggleDone()
-            return true
-        case 51, 117: // Delete / Forward Delete
+        case .delete:
             actions.delete()
-            return true
-        case 53: // Escape
+        case .escape:
             if !actions.selection.selectedIDs.isEmpty {
                 actions.selection.clear()
             } else {
                 toggle()
             }
-            return true
-        default:
-            break
-        }
-
-        let characters = event.charactersIgnoringModifiers?.lowercased()
-        if modifiers == [.command], characters == "c" {
+        case .copy:
             actions.copy()
-            return true
-        }
-        if modifiers == [.command], characters == "e" {
+        case .toggleExpanded:
             actions.toggleExpanded()
-            return true
+        case .copyAsList:
+            actions.copyAsList()
+        case .merge:
+            actions.merge()
         }
-        if modifiers == [.command, .shift] {
-            if characters == "c" {
-                actions.copyAsList()
-                return true
-            }
-            if characters == "m" {
-                actions.merge()
-                return true
-            }
-        }
-
-        return false
+        return true
     }
 }

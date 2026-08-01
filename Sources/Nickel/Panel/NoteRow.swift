@@ -332,30 +332,30 @@ struct NoteRow: View {
     @ViewBuilder
     private var contextMenuContent: some View {
         Button("Copy") { actions.copy() }
-            .keyboardShortcut("c", modifiers: .command)
+            .panelKeyboardShortcut(.copy)
 
         Button("Copy as List") { actions.copyAsList() }
-            .keyboardShortcut("c", modifiers: [.command, .shift])
+            .panelKeyboardShortcut(.copyAsList)
 
         Divider()
 
         Button(actions.allSelectedAreDone ? "Mark as Not Done" : "Mark as Done") {
             actions.toggleDone()
         }
-        .keyboardShortcut(" ", modifiers: [])
+        .panelKeyboardShortcut(.toggleDone)
 
         Button(actions.allSelectedAreExpanded ? "Collapse" : "Expand") {
             actions.toggleExpanded()
         }
-        .keyboardShortcut("e", modifiers: .command)
+        .panelKeyboardShortcut(.toggleExpanded)
         .disabled(selection.selectedIDs.isEmpty)
 
         Button("Edit") { actions.startEditingIfSingleSelected() }
-            .keyboardShortcut(.return, modifiers: [])
+            .panelKeyboardShortcut(.edit)
             .disabled(selection.selectedIDs.count != 1)
 
         Button("Merge Notes") { actions.merge() }
-            .keyboardShortcut("m", modifiers: [.command, .shift])
+            .panelKeyboardShortcut(.merge)
             .disabled(selection.selectedIDs.count < 2)
 
         Menu("Move to Section") {
@@ -370,7 +370,7 @@ struct NoteRow: View {
         Divider()
 
         Button("Delete") { actions.delete() }
-            .keyboardShortcut(.delete, modifiers: [])
+            .panelKeyboardShortcut(.delete)
     }
 }
 

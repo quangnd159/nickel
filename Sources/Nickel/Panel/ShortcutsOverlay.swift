@@ -46,7 +46,7 @@ struct ShortcutsOverlay: View {
                 ShortcutRow("Rename section", ["⇧", "⌘", "R"]),
                 ShortcutRow("Search", ["⌘", "F"]),
                 ShortcutRow("New note", ["⌘", "N"]),
-                ShortcutRow("Move selection", ["↑", "↓"]),
+                moveSelectionRow,
                 ShortcutRow("Keyboard shortcuts", ["⌘", "/"])
             ])
 
@@ -56,13 +56,13 @@ struct ShortcutsOverlay: View {
             ])
 
             group("Edit", [
-                ShortcutRow("Copy", ["⌘", "C"]),
-                ShortcutRow("Copy as list", ["⇧", "⌘", "C"]),
-                ShortcutRow("Toggle done", ["Space"]),
-                ShortcutRow("Edit note", ["↩"]),
-                ShortcutRow("Expand/collapse", ["⌘", "E"]),
-                ShortcutRow("Merge notes", ["⇧", "⌘", "M"]),
-                ShortcutRow("Delete", ["⌫"])
+                overlayRow(.copy),
+                overlayRow(.copyAsList),
+                overlayRow(.toggleDone),
+                overlayRow(.edit),
+                overlayRow(.toggleExpanded),
+                overlayRow(.merge),
+                overlayRow(.delete)
             ])
         }
         .padding(16)
@@ -113,6 +113,25 @@ struct ShortcutsOverlay: View {
 
     private func dismiss() {
         selection.presentedOverlay = nil
+    }
+
+    /// Builds a row from `PanelShortcuts`' table entry for `command`, the
+    /// single source of truth these labels and key caps come from — see
+    /// `PanelShortcuts.swift`.
+    private func overlayRow(_ command: PanelCommand) -> ShortcutRow {
+        guard let overlay = PanelShortcuts.shortcut(for: command).overlay else {
+            preconditionFailure("no overlay display for \(command)")
+        }
+        return ShortcutRow(overlay.label, overlay.keys)
+    }
+
+    /// The arrows have no single command of their own to display — they're
+    /// two table entries (`.moveUp`, `.moveDown`) that share a label — so
+    /// this combines both into the one "Move selection" row shown here.
+    private var moveSelectionRow: ShortcutRow {
+        let up = PanelShortcuts.shortcut(for: .moveUp).overlay!
+        let down = PanelShortcuts.shortcut(for: .moveDown).overlay!
+        return ShortcutRow(up.label, up.keys + down.keys)
     }
 }
 
