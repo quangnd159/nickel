@@ -1,4 +1,5 @@
 import AppKit
+import NickelObjCShims
 
 /// A borderless, non-activating panel that can never become key or main.
 ///
@@ -59,7 +60,15 @@ private final class HUDInstance {
         self.panel = panel
 
         panel.alphaValue = 0
-        panel.orderFrontRegardless()
+        // ViewBridge's NSRemoteView order-on-screen observer can throw an
+        // NSException during any window ordering on macOS betas (observed on
+        // 26A5388g), even though this window hosts no remote views. A throw
+        // here must cost the toast, not the process.
+        let ordered = NKRunWithExceptionGuard { panel.orderFrontRegardless() }
+        guard ordered else {
+            close()
+            return
+        }
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12

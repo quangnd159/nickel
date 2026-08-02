@@ -5,8 +5,13 @@ let package = Package(
     name: "Nickel",
     platforms: [.macOS(.v14)],
     targets: [
+        .target(
+            name: "NickelObjCShims",
+            path: "Sources/NickelObjCShims"
+        ),
         .executableTarget(
             name: "Nickel",
+            dependencies: ["NickelObjCShims"],
             path: "Sources/Nickel"
         ),
         .testTarget(
