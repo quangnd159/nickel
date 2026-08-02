@@ -373,15 +373,21 @@ final class NoteStore: ObservableObject {
         let mergedText = targets.map(\.text).joined(separator: "\n\n")
         notes[firstIndex].text = mergedText
 
+        var movedByDonor: [UUID: [Attachment]] = [:]
         for donor in donors where !donor.attachments.isEmpty {
-            moveAttachmentFiles(of: donor, intoNoteDirectoryFor: first.id)
+            movedByDonor[donor.id] = moveAttachmentFiles(of: donor, intoNoteDirectoryFor: first.id)
         }
-        notes[firstIndex].attachments += donors.flatMap(\.attachments)
+        notes[firstIndex].attachments += donors.flatMap { movedByDonor[$0.id] ?? [] }
 
         let idsToRemove = Set(donors.map(\.id))
         notes.removeAll { idsToRemove.contains($0.id) }
         for donor in donors {
-            removeAttachmentsDirectory(forNoteID: donor.id)
+            let moved = movedByDonor[donor.id] ?? []
+            if moved.count == donor.attachments.count {
+                removeAttachmentsDirectory(forNoteID: donor.id)
+            } else {
+                NSLog("NoteStore: leaving attachment directory for \(donor.id) in place; \(donor.attachments.count - moved.count) file(s) failed to move")
+            }
         }
         scheduleSave()
     }
@@ -425,23 +431,26 @@ final class NoteStore: ObservableObject {
     /// `merge`: an attachment's path is derived from its owning note's id, so
     /// reassigning it to a different note means relocating the file, not
     /// just editing the in-memory `Attachment` array.
-    private func moveAttachmentFiles(of donor: Note, intoNoteDirectoryFor noteID: UUID) {
+    private func moveAttachmentFiles(of donor: Note, intoNoteDirectoryFor noteID: UUID) -> [Attachment] {
         let destinationDirectory = attachmentsDirectory.appendingPathComponent(noteID.uuidString, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
         } catch {
             NSLog("NoteStore: failed to create attachments directory while merging: \(error)")
-            return
+            return []
         }
+        var moved: [Attachment] = []
         for attachment in donor.attachments {
             let source = url(for: attachment, in: donor)
             let destination = destinationDirectory.appendingPathComponent(attachmentFilename(attachment))
             do {
                 try FileManager.default.moveItem(at: source, to: destination)
+                moved.append(attachment)
             } catch {
                 NSLog("NoteStore: failed to move attachment \"\(attachment.filename)\" during merge: \(error)")
             }
         }
+        return moved
     }
 
     /// Deletes any `Attachments/<note-id>` directory whose note no longer

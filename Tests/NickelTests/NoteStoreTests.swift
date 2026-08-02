@@ -279,6 +279,59 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: donorDir.path))
     }
 
+    func testMergeSkipsRecordsForUnmovableAttachments() throws {
+        let sourceA = tempDirectory.appendingPathComponent("a.txt")
+        let sourceB = tempDirectory.appendingPathComponent("b.txt")
+        try "fileA".write(to: sourceA, atomically: true, encoding: .utf8)
+        try "fileB".write(to: sourceB, atomically: true, encoding: .utf8)
+
+        store.add(text: "first", attachments: [(sourceURL: sourceA, filename: "a.txt", contentType: "public.text")], sourceApp: nil)
+        let firstID = store.notes[0].id
+        store.add(text: "second", attachments: [(sourceURL: sourceB, filename: "b.txt", contentType: "public.text")], sourceApp: nil)
+        let secondID = store.notes[1].id
+        let donorAttachment = store.notes[1].attachments[0]
+
+        // Delete the donor's file on disk before merging, so moveItem fails.
+        let donorFileURL = store.url(for: donorAttachment, in: store.notes[1])
+        try FileManager.default.removeItem(at: donorFileURL)
+
+        store.merge(ids: [firstID, secondID])
+
+        XCTAssertEqual(store.notes.count, 1) // merge still happened
+        let survivor = store.notes[0]
+        XCTAssertEqual(survivor.text, "first\n\nsecond")
+        XCTAssertFalse(survivor.attachments.contains(where: { $0.id == donorAttachment.id }))
+    }
+
+    func testMergeLeavesDonorDirectoryWhenAMoveFails() throws {
+        let sourceA = tempDirectory.appendingPathComponent("a.txt")
+        let sourceB = tempDirectory.appendingPathComponent("b.txt")
+        try "fileA".write(to: sourceA, atomically: true, encoding: .utf8)
+        try "fileB".write(to: sourceB, atomically: true, encoding: .utf8)
+
+        store.add(text: "first", attachments: [(sourceURL: sourceA, filename: "a.txt", contentType: "public.text")], sourceApp: nil)
+        let firstID = store.notes[0].id
+        store.add(text: "second", attachments: [(sourceURL: sourceB, filename: "b.txt", contentType: "public.text")], sourceApp: nil)
+        let secondID = store.notes[1].id
+        let donorAttachment = store.notes[1].attachments[0]
+
+        // Pre-create a collision at the destination path so moveItem throws.
+        let destinationDir = store.attachmentsDirectory.appendingPathComponent(firstID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: destinationDir, withIntermediateDirectories: true)
+        let collisionURL = destinationDir.appendingPathComponent("\(donorAttachment.id.uuidString)-b.txt")
+        try "collision".write(to: collisionURL, atomically: true, encoding: .utf8)
+
+        store.merge(ids: [firstID, secondID])
+
+        let survivor = store.notes[0]
+        XCTAssertFalse(survivor.attachments.contains(where: { $0.id == donorAttachment.id }))
+
+        let donorDir = store.attachmentsDirectory.appendingPathComponent(secondID.uuidString, isDirectory: true)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: donorDir.path), "donor directory should be left in place when a move fails")
+        let donorFileURL = donorDir.appendingPathComponent("\(donorAttachment.id.uuidString)-b.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: donorFileURL.path), "donor's file should still be present since it never moved")
+    }
+
     // MARK: - Persistence
 
     func testPersistenceRoundTrips() {
