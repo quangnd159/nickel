@@ -495,10 +495,17 @@ final class NoteStore: ObservableObject {
     private func write(_ envelope: StoredEnvelope) {
         do {
             let directory = fileURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 
             let data = try Self.makeEncoder().encode(envelope)
             try data.write(to: fileURL, options: .atomic)
+
+            // Attributes on createDirectory only apply when the directory is newly
+            // created, and .atomic writes via a temp file + rename so the mode never
+            // carries over from a prior chmod. Reapply both after every write; a
+            // chmod failure must never fail the save, so these are best-effort.
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
         } catch {
             NSLog("NoteStore: failed to save notes: \(error)")
         }
