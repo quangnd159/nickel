@@ -608,6 +608,7 @@ final class NoteStore: ObservableObject {
         let fileManager = FileManager.default
 
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         formatter.timeZone = TimeZone(identifier: "UTC")
         let timestamp = formatter.string(from: Date())
