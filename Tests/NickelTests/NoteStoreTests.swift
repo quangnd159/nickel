@@ -295,6 +295,25 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.activeSection, store.activeSection)
     }
 
+    func testScheduledSaveEventuallyWritesFile() {
+        store.add(text: "background save", sourceApp: "TestApp")
+
+        let deadline = Date().addingTimeInterval(2)
+        var didFindNote = false
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                let reloaded = NoteStore(fileURL: fileURL)
+                if reloaded.notes.map(\.text).contains("background save") {
+                    didFindNote = true
+                    break
+                }
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+
+        XCTAssertTrue(didFindNote, "expected the debounced save to eventually write the note to disk")
+    }
+
     func testDecodingNoteWithoutAttachmentsKeyIsBackwardCompatible() throws {
         let json = """
         {
