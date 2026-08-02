@@ -218,15 +218,15 @@ enum MarkdownConverter {
 
             var marked = core
             let font = attributes[.font] as? NSFont
-            let traits = font.map { NSFontManager.shared.traits(of: $0) } ?? []
+            let traits = font?.fontDescriptor.symbolicTraits ?? []
 
             if isMonospaced(font) {
                 marked = "`\(marked)`"
             } else {
-                if traits.contains(.italicFontMask) {
+                if traits.contains(.italic) {
                     marked = "*\(marked)*"
                 }
-                if traits.contains(.boldFontMask), !suppressBold {
+                if traits.contains(.bold), !suppressBold {
                     marked = "**\(marked)**"
                 }
             }
@@ -257,8 +257,8 @@ enum MarkdownConverter {
     /// text sources) never gets misread as a heading.
     private static func headingLevel(for font: NSFont?) -> Int? {
         guard let font else { return nil }
-        let traits = NSFontManager.shared.traits(of: font)
-        guard traits.contains(.boldFontMask) else { return nil }
+        let traits = font.fontDescriptor.symbolicTraits
+        guard traits.contains(.bold) else { return nil }
         switch font.pointSize {
         case 20...: return 1
         case 17..<20: return 2
