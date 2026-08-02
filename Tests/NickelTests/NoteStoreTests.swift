@@ -347,41 +347,46 @@ final class NoteStoreTests: XCTestCase {
 
     // MARK: - Corruption recovery
 
+    /// Finds corrupt-file backups (`notes-corrupt-*.json`) in `tempDirectory`.
+    private func corruptBackupFiles() -> [URL] {
+        let entries = (try? FileManager.default.contentsOfDirectory(at: tempDirectory, includingPropertiesForKeys: nil)) ?? []
+        return entries.filter { $0.lastPathComponent.hasPrefix("notes-corrupt-") && $0.pathExtension == "json" }
+    }
+
     func testCorruptFileIsMovedAsideAndStoreStartsEmpty() {
-        let backupURL = tempDirectory.appendingPathComponent("notes.json.bak")
         try! Data([0xFF, 0x00, 0x12]).write(to: fileURL)
 
         let reloaded = NoteStore(fileURL: fileURL)
 
         XCTAssertTrue(reloaded.notes.isEmpty)
         XCTAssertTrue(reloaded.sections.isEmpty)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: backupURL.path))
+        XCTAssertEqual(corruptBackupFiles().count, 1)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
-    func testCorruptFileOverwritesExistingBackup() {
-        let backupURL = tempDirectory.appendingPathComponent("notes.json.bak")
-        let oldBackupContent = "old backup".data(using: .utf8)!
-        try! oldBackupContent.write(to: backupURL)
-        let invalidJSON = "{not json".data(using: .utf8)!
-        try! invalidJSON.write(to: fileURL)
-
+    func testSecondCorruptLoadDoesNotDestroyFirstBackup() {
+        let firstGarbage = "first garbage".data(using: .utf8)!
+        try! firstGarbage.write(to: fileURL)
         _ = NoteStore(fileURL: fileURL)
 
-        let backupContent = try! Data(contentsOf: backupURL)
-        XCTAssertEqual(backupContent, invalidJSON)
-        XCTAssertNotEqual(backupContent, oldBackupContent)
+        let secondGarbage = "second different garbage".data(using: .utf8)!
+        try! secondGarbage.write(to: fileURL)
+        _ = NoteStore(fileURL: fileURL)
+
+        let backups = corruptBackupFiles()
+        XCTAssertEqual(backups.count, 2)
+        let contents = Set(backups.map { try! Data(contentsOf: $0) })
+        XCTAssertEqual(contents, Set([firstGarbage, secondGarbage]))
     }
 
     func testUnparseableJSONObjectIsTreatedAsCorrupt() {
-        let backupURL = tempDirectory.appendingPathComponent("notes.json.bak")
         try! "[1, 2, 3]".data(using: .utf8)!.write(to: fileURL)
 
         let reloaded = NoteStore(fileURL: fileURL)
 
         XCTAssertTrue(reloaded.notes.isEmpty)
         XCTAssertTrue(reloaded.sections.isEmpty)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: backupURL.path))
+        XCTAssertEqual(corruptBackupFiles().count, 1)
     }
 
     // MARK: - Legacy migration and repair
@@ -457,5 +462,41 @@ final class NoteStoreTests: XCTestCase {
 
         XCTAssertEqual(reloaded.sections, ["Work", "Personal"])
         XCTAssertNil(reloaded.activeSection)
+    }
+
+    // MARK: - Orphaned attachment sweep
+
+    func testSweepRemovesOrphanedAttachmentDirectoryOnCleanLoad() throws {
+        store.add(text: "hello", sourceApp: nil)
+        let noteID = store.notes[0].id
+        store.saveNow()
+
+        let noteDir = store.attachmentsDirectory.appendingPathComponent(noteID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: noteDir, withIntermediateDirectories: true)
+        try "dummy".write(to: noteDir.appendingPathComponent("dummy.txt"), atomically: true, encoding: .utf8)
+
+        let orphanID = UUID()
+        let orphanDir = store.attachmentsDirectory.appendingPathComponent(orphanID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: orphanDir, withIntermediateDirectories: true)
+        try "dummy".write(to: orphanDir.appendingPathComponent("dummy.txt"), atomically: true, encoding: .utf8)
+
+        _ = NoteStore(fileURL: fileURL)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphanDir.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: noteDir.path))
+    }
+
+    func testSweepSkippedWhenStoreFileIsCorrupt() throws {
+        try "not json".data(using: .utf8)!.write(to: fileURL)
+
+        let orphanID = UUID()
+        let orphanDir = store.attachmentsDirectory.appendingPathComponent(orphanID.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: orphanDir, withIntermediateDirectories: true)
+        try "dummy".write(to: orphanDir.appendingPathComponent("dummy.txt"), atomically: true, encoding: .utf8)
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertTrue(reloaded.notes.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: orphanDir.path))
     }
 }

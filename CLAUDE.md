@@ -7,7 +7,7 @@ A native macOS menu-bar-triggered note capture app: double-Shift grabs the curre
 | Purpose | Command | Notes |
 |---|---|---|
 | Build | `swift build` | SwiftPM, macOS 14+, zero external dependencies — keep it that way |
-| Test | `swift test` | XCTest, `Tests/NickelTests/`, 26 tests, runs in seconds |
+| Test | `swift test` | XCTest, `Tests/NickelTests/`, runs in seconds |
 | App bundle | `./scripts/build-app.sh` | Release build + `.app` in `build/`. **Do not run unless asked** — the user rebuilds/installs on request |
 | Install | `./scripts/build-app.sh --install` | Copies to `/Applications/Nickel.app`. Same rule: only on request |
 

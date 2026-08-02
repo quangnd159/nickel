@@ -48,7 +48,13 @@ final class NoteStore: ObservableObject {
         self.sections = loaded.sections
         self.activeSection = loaded.activeSection
 
-        sweepOrphanedAttachmentDirectories()
+        // A failed/corrupt load leaves `notes` empty without those notes
+        // actually being gone (see `load`'s failure paths), so sweeping now
+        // would delete every attachment directory as "orphaned." Only sweep
+        // when the load genuinely reflects what's on disk.
+        if loaded.loadedCleanly {
+            sweepOrphanedAttachmentDirectories()
+        }
     }
 
     // MARK: - Mutations
@@ -525,6 +531,12 @@ final class NoteStore: ObservableObject {
         var notes: [Note]
         var sections: [String]
         var activeSection: String?
+        /// False when the on-disk file exists but couldn't be read or
+        /// decoded, so `notes` is empty as a fallback rather than a true
+        /// reflection of "no notes exist." Callers must not treat a dirty
+        /// load as authoritative for anything destructive (e.g. sweeping
+        /// "orphaned" attachment directories).
+        var loadedCleanly: Bool = true
     }
 
     private static func load(from url: URL) -> Loaded {
@@ -535,7 +547,7 @@ final class NoteStore: ObservableObject {
         guard let data = try? Data(contentsOf: url) else {
             NSLog("NoteStore: notes file could not be read, moving aside")
             moveCorruptFileAside(url)
-            return Loaded(notes: [], sections: [], activeSection: nil)
+            return Loaded(notes: [], sections: [], activeSection: nil, loadedCleanly: false)
         }
 
         let decoder = makeDecoder()
@@ -555,7 +567,7 @@ final class NoteStore: ObservableObject {
 
         NSLog("NoteStore: notes file is corrupt, moving aside")
         moveCorruptFileAside(url)
-        return Loaded(notes: [], sections: [], activeSection: nil)
+        return Loaded(notes: [], sections: [], activeSection: nil, loadedCleanly: false)
     }
 
     /// Distinct non-nil list names, in first-appearance order.
@@ -585,13 +597,30 @@ final class NoteStore: ObservableObject {
         return Loaded(notes: notes, sections: repairedSections, activeSection: repairedActiveSection)
     }
 
+    /// Moves an unreadable/corrupt notes file aside rather than losing it.
+    /// Each call gets a unique, timestamped backup name (`notes-corrupt-
+    /// <timestamp>.json`, with a numeric suffix if that exact name is
+    /// somehow already taken) so repeated failures never overwrite an
+    /// earlier backup — the only surviving copy of a user's notes must never
+    /// be silently destroyed.
     private static func moveCorruptFileAside(_ url: URL) {
-        let backupURL = url.deletingLastPathComponent().appendingPathComponent("notes.json.bak")
+        let directory = url.deletingLastPathComponent()
         let fileManager = FileManager.default
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        let timestamp = formatter.string(from: Date())
+
+        var backupURL = directory.appendingPathComponent("notes-corrupt-\(timestamp).json")
+        var suffix = 2
+        while fileManager.fileExists(atPath: backupURL.path) {
+            backupURL = directory.appendingPathComponent("notes-corrupt-\(timestamp)-\(suffix).json")
+            suffix += 1
+        }
+
         do {
-            if fileManager.fileExists(atPath: backupURL.path) {
-                try fileManager.removeItem(at: backupURL)
-            }
             try fileManager.moveItem(at: url, to: backupURL)
         } catch {
             NSLog("NoteStore: failed to move corrupt notes file aside: \(error)")
