@@ -109,10 +109,16 @@ final class SelectionModel: ObservableObject {
         return store.notes.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
     }
 
+    /// One filter pass, grouped by section. Computed on demand like
+    /// `filteredNotes` — never stored — so it can't lag the store.
+    var filteredNotesBySection: [String?: [Note]] {
+        Dictionary(grouping: filteredNotes, by: \.listName)
+    }
+
     /// `filteredNotes` scoped to one section, or the ungrouped notes when
     /// `section` is `nil`.
     func notes(in section: String?) -> [Note] {
-        filteredNotes.filter { $0.listName == section }
+        filteredNotesBySection[section] ?? []
     }
 
     /// The flat, filtered, visible order of note IDs, matching the note
@@ -121,12 +127,13 @@ final class SelectionModel: ObservableObject {
     /// notes. Computed on demand (not cached) so it's always in step with
     /// the store — no pushed-copy sync to fall a frame behind a mutation.
     var visibleOrder: [UUID] {
+        let grouped = filteredNotesBySection
         if let activeSection = store.activeSection {
-            return notes(in: activeSection).map(\.id)
+            return (grouped[activeSection] ?? []).map(\.id)
         }
-        var ids = notes(in: nil).map(\.id)
+        var ids = (grouped[String?.none] ?? []).map(\.id)
         for sectionName in store.sections {
-            ids += notes(in: sectionName).map(\.id)
+            ids += (grouped[sectionName] ?? []).map(\.id)
         }
         return ids
     }
