@@ -672,7 +672,10 @@ struct PanelView: View {
                 .truncationMode(.middle)
                 .frame(maxWidth: 120, alignment: .leading)
 
-            Button(action: { pendingAttachments.removeAll { $0.id == staged.id } }) {
+            Button(action: {
+                Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
+                pendingAttachments.removeAll { $0.id == staged.id }
+            }) {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
@@ -841,6 +844,20 @@ struct PanelView: View {
         (try? url.resourceValues(forKeys: [.contentTypeKey]).contentType)?.identifier ?? UTType.data.identifier
     }
 
+    /// Deletes the throwaway temp directory backing a staged raw-image
+    /// attachment. Only fires for URLs under the app's temp staging area —
+    /// picker/drag sources are the user's real files and must survive.
+    private static func removeTemporaryStagingDirectory(for sourceURL: URL) {
+        let tempRoot = FileManager.default.temporaryDirectory.standardizedFileURL
+        let directory = sourceURL.standardizedFileURL.deletingLastPathComponent()
+        guard directory.path.hasPrefix(tempRoot.path + "/") else { return }
+        do {
+            try FileManager.default.removeItem(at: directory)
+        } catch {
+            NSLog("PanelView: failed to remove temporary staging directory: \(error)")
+        }
+    }
+
     /// Writes `image` out as a standalone PNG in a fresh temp directory (so
     /// concurrent drops/pastes never collide on the same "Image.png" name),
     /// for raw clipboard/drag image payloads that have no backing file of
@@ -900,6 +917,9 @@ struct PanelView: View {
         } else {
             let attachments = pendingAttachments.map { (sourceURL: $0.sourceURL, filename: $0.filename, contentType: $0.contentType) }
             store.add(text: text, attachments: attachments, sourceApp: nil)
+            for staged in pendingAttachments {
+                Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
+            }
             pendingAttachments = []
         }
         composerText = ""
