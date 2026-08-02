@@ -81,6 +81,30 @@ final class MarkdownConverterTests: XCTestCase {
         XCTAssertEqual(result!.trimmingCharacters(in: .whitespacesAndNewlines), "")
     }
 
+    // MARK: - Remote resource stripping
+
+    func testHTMLImageTagIsStrippedWithoutDroppingSurroundingText() {
+        let result = MarkdownConverter.markdown(fromHTML: html("<p>hello <img src=\"https://tracker.example/p.gif\"> world</p>"))
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result!.contains("hello"), "expected leading text preserved in: \(result!)")
+        XCTAssertTrue(result!.contains("world"), "expected trailing text preserved in: \(result!)")
+        XCTAssertFalse(result!.contains("tracker.example"), "expected tracker URL stripped from: \(result!)")
+    }
+
+    func testHTMLStyleBlockRemoteURLIsNeutralizedButHeadingSurvives() {
+        let result = MarkdownConverter.markdown(fromHTML: html("<style>h1 { color: red; background: url(https://tracker.example/b.png) }</style><h1>Title</h1>"))
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result!.hasPrefix("# Title"), "expected heading to still be produced in: \(result!)")
+        XCTAssertFalse(result!.contains("tracker.example"), "expected tracker URL stripped from: \(result!)")
+    }
+
+    func testHTMLBoldAndLinkSurviveSanitizing() {
+        let result = MarkdownConverter.markdown(fromHTML: html("<b>bold</b> <a href=\"https://example.com\">link</a>"))
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result!.contains("**bold**"), "expected bold markers in: \(result!)")
+        XCTAssertTrue(result!.contains("[link](https://example.com/)"), "expected markdown link to survive sanitizing in: \(result!)")
+    }
+
     // MARK: - RTF path
 
     private func rtfData(from attributed: NSAttributedString) -> Data {
