@@ -19,6 +19,10 @@ final class NoteStore: ObservableObject {
     let fileURL: URL
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounceInterval: TimeInterval = 0.5
+    /// Serial queue that performs the actual disk write. Snapshots are taken
+    /// on the main thread in mutation order and enqueued here in that same
+    /// order, so writes can never reorder relative to each other.
+    private let saveQueue = DispatchQueue(label: "com.nickel.notestore.save", qos: .utility)
 
     /// Hard cap on a single note's length. Guards against runaway captures
     /// (e.g. selecting an entire huge document) bloating the notes file and
@@ -459,22 +463,40 @@ final class NoteStore: ObservableObject {
 
     private func scheduleSave() {
         saveWorkItem?.cancel()
-        let workItem = DispatchWorkItem { [weak self] in self?.saveNow() }
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            let envelope = StoredEnvelope(version: 2, sections: self.sections, activeSection: self.activeSection, notes: self.notes)
+            self.saveWorkItem = nil
+            self.saveQueue.async {
+                self.write(envelope)
+            }
+        }
         saveWorkItem = workItem
         DispatchQueue.main.asyncAfter(deadline: .now() + saveDebounceInterval, execute: workItem)
     }
 
     /// Writes the current notes to disk immediately, bypassing the debounce.
-    /// Safe to call from `applicationWillTerminate`.
+    /// Safe to call from `applicationWillTerminate`. Snapshots the envelope
+    /// on the caller's thread, then fences the write behind any in-flight
+    /// async save on `saveQueue` (a serial queue), so the last write on
+    /// return is always this snapshot.
     func saveNow() {
         saveWorkItem?.cancel()
         saveWorkItem = nil
 
+        let envelope = StoredEnvelope(version: 2, sections: sections, activeSection: activeSection, notes: notes)
+        saveQueue.sync {
+            self.write(envelope)
+        }
+    }
+
+    /// Encodes and writes a snapshotted envelope to disk. Only ever called
+    /// on `saveQueue`.
+    private func write(_ envelope: StoredEnvelope) {
         do {
             let directory = fileURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
-            let envelope = StoredEnvelope(version: 2, sections: sections, activeSection: activeSection, notes: notes)
             let data = try Self.makeEncoder().encode(envelope)
             try data.write(to: fileURL, options: .atomic)
         } catch {
