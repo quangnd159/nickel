@@ -295,6 +295,17 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(reloaded.activeSection, store.activeSection)
     }
 
+    func testSaveAppliesOwnerOnlyPermissions() {
+        store.add(text: "x", sourceApp: nil)
+        store.saveNow()
+
+        let fileAttributes = try! FileManager.default.attributesOfItem(atPath: fileURL.path)
+        XCTAssertEqual((fileAttributes[.posixPermissions] as? NSNumber)?.uint16Value, 0o600)
+
+        let directoryAttributes = try! FileManager.default.attributesOfItem(atPath: tempDirectory.path)
+        XCTAssertEqual((directoryAttributes[.posixPermissions] as? NSNumber)?.uint16Value, 0o700)
+    }
+
     func testScheduledSaveEventuallyWritesFile() {
         store.add(text: "background save", sourceApp: "TestApp")
 
