@@ -6,11 +6,16 @@ merged. Round 2 (plans 015–025) generated 2026-08-02 against commit
 Each executor: read the plan fully before starting, honor its STOP
 conditions, and update your row when done.
 
+Reconcile pass 2026-08-03 at commit `999913b`: no source changes since the
+round-2 plans were written (`83d0b46` + plans commit only), so all eleven
+TODO plans are drift-free and executable as written. Round 1 re-verified:
+`swift test` 79/79 green.
+
 ## Round 2 — execution order & status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 015  | Make store load failures non-destructive (sweep gate + backups) | P1 | S | — | TODO |
+| 015  | Make store load failures non-destructive (sweep gate + backups) | P1 | S | — | DONE (merged 2026-08-03, verified on main: 81/81) |
 | 016  | Stop merge from destroying unmoved donor attachments | P1 | S | 015 (soft) | TODO |
 | 017  | Keep failed attachment copies staged in the composer | P1 | S–M | 016 (soft) | TODO |
 | 018  | Surface note-save failures in the panel | P2 | M | 017 (soft) | TODO |
