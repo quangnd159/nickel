@@ -69,6 +69,19 @@ enum UpdateChecker {
         return false
     }
 
+    /// Only ever open the release page we expect: https, on github.com or a
+    /// subdomain. Anything else in `html_url` means the response was tampered
+    /// with or the API changed shape — don't hand it to the OS.
+    static func validatedReleaseURL(_ string: String) -> URL? {
+        guard let url = URL(string: string),
+              url.scheme?.lowercased() == "https",
+              let host = url.host?.lowercased(),
+              host == "github.com" || host.hasSuffix(".github.com") else {
+            return nil
+        }
+        return url
+    }
+
     private static func presentUpdateAvailable(version: String, releaseURL: String) {
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
@@ -76,8 +89,12 @@ enum UpdateChecker {
         alert.informativeText = "You're currently running an older version."
         alert.addButton(withTitle: "View Release")
         alert.addButton(withTitle: "Later")
-        if alert.runModal() == .alertFirstButtonReturn, let url = URL(string: releaseURL) {
-            NSWorkspace.shared.open(url)
+        if alert.runModal() == .alertFirstButtonReturn {
+            if let url = validatedReleaseURL(releaseURL) {
+                NSWorkspace.shared.open(url)
+            } else {
+                presentError("The release page address was unexpected.")
+            }
         }
     }
 
