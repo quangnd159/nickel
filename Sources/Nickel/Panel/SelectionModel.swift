@@ -100,13 +100,17 @@ final class SelectionModel: ObservableObject {
 
     // MARK: - Visible order derivation
 
-    /// Notes matching `searchText` (case-insensitive substring), or all of
-    /// `store.notes` when the search field is empty. The single source both
-    /// `PanelView`'s rendering and `visibleOrder` below filter from, so the
-    /// two can never diverge.
+    /// Notes matching `searchText` (case-insensitive substring over the
+    /// note's text and its attachments' filenames), or all of `store.notes`
+    /// when the search field is empty. The single source both `PanelView`'s
+    /// rendering and `visibleOrder` below filter from, so the two can never
+    /// diverge.
     var filteredNotes: [Note] {
         guard !searchText.isEmpty else { return store.notes }
-        return store.notes.filter { $0.text.localizedCaseInsensitiveContains(searchText) }
+        return store.notes.filter { note in
+            note.text.localizedCaseInsensitiveContains(searchText)
+                || note.attachments.contains { $0.filename.localizedCaseInsensitiveContains(searchText) }
+        }
     }
 
     /// One filter pass, grouped by section. Computed on demand like
