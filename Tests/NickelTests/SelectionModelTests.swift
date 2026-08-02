@@ -189,6 +189,57 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertEqual(selection.visibleOrder, [idUngrouped, idA, idB])
     }
 
+    // MARK: - Search filtering by attachment filename
+
+    func testSearchMatchesAttachmentOnlyNoteByFilename() {
+        store.add(text: "alpha", sourceApp: nil)
+
+        let sourceURL = tempDirectory.appendingPathComponent("source-screenshot.png")
+        try! Data().write(to: sourceURL)
+        store.add(
+            text: "",
+            attachments: [(sourceURL: sourceURL, filename: "screenshot-beta.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+        let idAttachmentOnly = store.notes[1].id
+
+        selection.searchText = "beta"
+
+        XCTAssertEqual(selection.filteredNotes.map(\.id), [idAttachmentOnly])
+        XCTAssertEqual(selection.visibleOrder, [idAttachmentOnly])
+    }
+
+    func testSearchStillMatchesTextWhenNoteHasAttachments() {
+        let sourceURL = tempDirectory.appendingPathComponent("source-other.png")
+        try! Data().write(to: sourceURL)
+        store.add(
+            text: "gamma",
+            attachments: [(sourceURL: sourceURL, filename: "other.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+        let idGamma = store.notes[0].id
+
+        selection.searchText = "gamma"
+
+        XCTAssertEqual(selection.filteredNotes.map(\.id), [idGamma])
+    }
+
+    func testSearchMissesWhenNeitherTextNorFilenameMatch() {
+        store.add(text: "alpha", sourceApp: nil)
+
+        let sourceURL = tempDirectory.appendingPathComponent("source-beta.png")
+        try! Data().write(to: sourceURL)
+        store.add(
+            text: "",
+            attachments: [(sourceURL: sourceURL, filename: "beta.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+
+        selection.searchText = "zzz"
+
+        XCTAssertTrue(selection.filteredNotes.isEmpty)
+    }
+
     // MARK: - Select all
 
     func testSelectAllNotesSelectsEverythingWithAnchorFirstAndLeadLast() {
