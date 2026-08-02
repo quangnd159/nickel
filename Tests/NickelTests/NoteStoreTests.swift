@@ -314,4 +314,118 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(note.text, "legacy note")
         XCTAssertTrue(note.attachments.isEmpty)
     }
+
+    // MARK: - Corruption recovery
+
+    func testCorruptFileIsMovedAsideAndStoreStartsEmpty() {
+        let backupURL = tempDirectory.appendingPathComponent("notes.json.bak")
+        try! Data([0xFF, 0x00, 0x12]).write(to: fileURL)
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertTrue(reloaded.notes.isEmpty)
+        XCTAssertTrue(reloaded.sections.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backupURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path))
+    }
+
+    func testCorruptFileOverwritesExistingBackup() {
+        let backupURL = tempDirectory.appendingPathComponent("notes.json.bak")
+        let oldBackupContent = "old backup".data(using: .utf8)!
+        try! oldBackupContent.write(to: backupURL)
+        let invalidJSON = "{not json".data(using: .utf8)!
+        try! invalidJSON.write(to: fileURL)
+
+        _ = NoteStore(fileURL: fileURL)
+
+        let backupContent = try! Data(contentsOf: backupURL)
+        XCTAssertEqual(backupContent, invalidJSON)
+        XCTAssertNotEqual(backupContent, oldBackupContent)
+    }
+
+    func testUnparseableJSONObjectIsTreatedAsCorrupt() {
+        let backupURL = tempDirectory.appendingPathComponent("notes.json.bak")
+        try! "[1, 2, 3]".data(using: .utf8)!.write(to: fileURL)
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertTrue(reloaded.notes.isEmpty)
+        XCTAssertTrue(reloaded.sections.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: backupURL.path))
+    }
+
+    // MARK: - Legacy migration and repair
+
+    func testLegacyBareArrayMigratesSectionsInFirstAppearanceOrder() {
+        let json = """
+        [
+          {
+            "id": "\(UUID().uuidString)",
+            "text": "note in B",
+            "listName": "B",
+            "isDone": false,
+            "createdAt": "2024-01-01T00:00:00Z",
+            "sourceApp": null
+          },
+          {
+            "id": "\(UUID().uuidString)",
+            "text": "note in A",
+            "listName": "A",
+            "isDone": false,
+            "createdAt": "2024-01-02T00:00:00Z",
+            "sourceApp": null
+          }
+        ]
+        """
+        try! json.data(using: .utf8)!.write(to: fileURL)
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertEqual(reloaded.sections, ["B", "A"])
+        XCTAssertNil(reloaded.activeSection)
+        XCTAssertEqual(reloaded.notes.map(\.text), ["note in B", "note in A"])
+    }
+
+    func testEnvelopeWithUnknownActiveSectionResetsToNil() {
+        let json = """
+        {
+          "version": 2,
+          "sections": ["Work"],
+          "activeSection": "Ghost",
+          "notes": []
+        }
+        """
+        try! json.data(using: .utf8)!.write(to: fileURL)
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertEqual(reloaded.sections, ["Work"])
+        XCTAssertNil(reloaded.activeSection)
+    }
+
+    func testEnvelopeWithNoteInUnlistedSectionAppendsSection() {
+        let json = """
+        {
+          "version": 2,
+          "sections": ["Work"],
+          "activeSection": null,
+          "notes": [
+            {
+              "id": "\(UUID().uuidString)",
+              "text": "orphaned note",
+              "listName": "Personal",
+              "isDone": false,
+              "createdAt": "2024-01-01T00:00:00Z",
+              "sourceApp": null
+            }
+          ]
+        }
+        """
+        try! json.data(using: .utf8)!.write(to: fileURL)
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertEqual(reloaded.sections, ["Work", "Personal"])
+        XCTAssertNil(reloaded.activeSection)
+    }
 }
