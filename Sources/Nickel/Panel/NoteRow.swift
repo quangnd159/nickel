@@ -296,8 +296,7 @@ struct NoteRow: View {
 
     private func commitEdit() {
         guard isEditing else { return }
-        store.update(id: note.id, text: selection.editingText)
-        selection.endEditing()
+        actions.commitActiveEditIfAny()
     }
 
     // MARK: - Inline edit field focus/keys
