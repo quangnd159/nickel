@@ -137,6 +137,12 @@ enum MarkdownCache {
         return cache
     }()
 
+    private static let inlineCache: NSCache<NSString, AttributedStringBox> = {
+        let cache = NSCache<NSString, AttributedStringBox>()
+        cache.countLimit = 500
+        return cache
+    }()
+
     /// The parsed block array for `text`, used by `MarkdownBlocksView`.
     static func blocks(for text: String) -> [MarkdownBlock] {
         let key = text as NSString
@@ -160,6 +166,17 @@ enum MarkdownCache {
         )
         let attributed = (try? AttributedString(markdown: flattened, options: options)) ?? AttributedString(flattened)
         previewCache.setObject(AttributedStringBox(attributed), forKey: key)
+        return attributed
+    }
+
+    /// The inline-parsed `AttributedString` for one block's text, used by
+    /// `MarkdownBlocksView.blockView`. Same rationale as the caches above.
+    static func inline(for text: String) -> AttributedString {
+        let key = text as NSString
+        if let box = inlineCache.object(forKey: key) { return box.value }
+        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        let attributed = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        inlineCache.setObject(AttributedStringBox(attributed), forKey: key)
         return attributed
     }
 }
@@ -240,7 +257,6 @@ struct MarkdownBlocksView: View {
     }
 
     private func inline(_ text: String) -> AttributedString {
-        let options = AttributedString.MarkdownParsingOptions(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-        return (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        MarkdownCache.inline(for: text)
     }
 }
