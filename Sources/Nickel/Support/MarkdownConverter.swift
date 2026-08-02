@@ -17,10 +17,81 @@ enum MarkdownConverter {
         // AppKit's HTML importer must run on the main thread (it synchronizes
         // with it internally and times out when called from elsewhere), but
         // capture runs on a background queue — hop over if needed.
-        let parse = { NSAttributedString(html: data, documentAttributes: nil) }
+        let sanitized = strippingRemoteResources(data)
+        let parse = { NSAttributedString(html: sanitized, documentAttributes: nil) }
         let attributed = Thread.isMainThread ? parse() : DispatchQueue.main.sync(execute: parse)
         guard let attributed else { return nil }
         return markdown(from: attributed)
+    }
+
+    // MARK: - Remote resource sanitizing
+
+    /// Strips fetch-triggering constructs (images, iframes, scripts,
+    /// stylesheet links, CSS `url()`/`@import` fetches, …) from captured HTML
+    /// before it's handed to AppKit's WebKit-backed HTML importer, which can
+    /// resolve those references — and make outbound network requests — while
+    /// parsing. Capture fires on arbitrary copied content, so this closes a
+    /// tracking-pixel / beaconing leak in an app that's meant to be local-only.
+    ///
+    /// This is regex-over-HTML, which is not a faithful HTML parser — that's
+    /// fine here: the goal is only to remove fetch triggers from importer
+    /// input, not to parse HTML correctly. An over-broad match can degrade
+    /// formatting fidelity, but it never reintroduces a fetch.
+    private static func strippingRemoteResources(_ data: Data) -> Data {
+        let encoding: String.Encoding
+        let text: String
+        if let utf8 = String(data: data, encoding: .utf8) {
+            encoding = .utf8
+            text = utf8
+        } else if let latin1 = String(data: data, encoding: .isoLatin1) {
+            encoding = .isoLatin1
+            text = latin1
+        } else {
+            return data
+        }
+
+        var sanitized = text
+
+        // 1. Void/empty resource elements — remove the tag entirely.
+        for tag in ["img", "source", "track", "embed", "input"] {
+            sanitized = sanitized.replacingOccurrences(
+                of: "<\(tag)\\b[^>]*>",
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        // 2. Paired resource elements — remove the tag and its content.
+        for tag in ["iframe", "object", "video", "audio", "script"] {
+            sanitized = sanitized.replacingOccurrences(
+                of: "(?s)<\(tag)\\b[^>]*>.*?</\(tag)>",
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        // 3. <link> tags (stylesheet/prefetch fetches).
+        sanitized = sanitized.replacingOccurrences(
+            of: "<link\\b[^>]*>",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        // 4. CSS fetches: neutralize remote url(...) references and drop
+        // @import statements, while keeping the surrounding styling intact.
+        sanitized = sanitized.replacingOccurrences(
+            of: "url\\(\\s*['\"]?(https?:)?//[^)]*\\)",
+            with: "url(about:blank)",
+            options: [.regularExpression, .caseInsensitive]
+        )
+        sanitized = sanitized.replacingOccurrences(
+            of: "@import[^;]*;",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        guard let reencoded = sanitized.data(using: encoding) else { return data }
+        return reencoded
     }
 
     static func markdown(fromRTF data: Data) -> String? {
