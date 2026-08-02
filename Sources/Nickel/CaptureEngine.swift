@@ -47,6 +47,13 @@ enum CaptureEngine {
         return selectedText as? String
     }
 
+    /// How long to wait for the ⌘C copy to land before giving up on the fast path.
+    private static let primaryPollWindow: TimeInterval = 1.0
+    /// How long to keep watching the pasteboard after restoring the user's
+    /// snapshot, to catch a copy that lands late (slow app, remote desktop).
+    private static let graceWindow: TimeInterval = 0.5
+    private static let pollInterval: TimeInterval = 0.03
+
     private static func captureViaPasteboard() -> String? {
         let pasteboard = NSPasteboard.general
         let originalChangeCount = pasteboard.changeCount
@@ -55,17 +62,37 @@ enum CaptureEngine {
         postCommandC()
 
         var changed = false
-        let deadline = Date().addingTimeInterval(0.25)
+        let deadline = Date().addingTimeInterval(primaryPollWindow)
         while Date() < deadline {
             if pasteboard.changeCount != originalChangeCount {
                 changed = true
                 break
             }
-            Thread.sleep(forTimeInterval: 0.03)
+            Thread.sleep(forTimeInterval: pollInterval)
         }
 
-        let captured = changed ? markdown(from: pasteboard) ?? pasteboard.string(forType: .string) : nil
+        var captured = changed ? markdown(from: pasteboard) ?? pasteboard.string(forType: .string) : nil
         restore(snapshot, to: pasteboard)
+
+        if !changed {
+            // The copy hasn't landed yet. Keep watching the pasteboard for a
+            // grace period even though we already restored the user's
+            // snapshot: if a late write arrives, treat it as the capture and
+            // restore again so the user's clipboard is preserved. Trade-off:
+            // a user-initiated copy performed within this window (right
+            // after a failed capture) would be reverted too, which is
+            // acceptable since the user just double-tapped the capture shortcut.
+            let restoredChangeCount = pasteboard.changeCount
+            let graceDeadline = Date().addingTimeInterval(graceWindow)
+            while Date() < graceDeadline {
+                if pasteboard.changeCount != restoredChangeCount {
+                    captured = markdown(from: pasteboard) ?? pasteboard.string(forType: .string)
+                    restore(snapshot, to: pasteboard)
+                    break
+                }
+                Thread.sleep(forTimeInterval: pollInterval)
+            }
+        }
 
         guard let text = captured?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else {
             return nil
