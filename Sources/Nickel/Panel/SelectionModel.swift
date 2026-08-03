@@ -8,6 +8,17 @@ enum PanelOverlay {
     case shortcuts
 }
 
+/// A request to scroll a given note into view, raised only by keyboard
+/// navigation (never clicks or select-all — AppKit's `NSTableView` doesn't
+/// auto-scroll for those either). `token` is regenerated on every request so
+/// repeated arrow presses that land on the same lead row (e.g. hitting the
+/// top/bottom boundary) still produce a distinct `Equatable` value and fire
+/// `.onChange`.
+struct RevealRequest: Equatable {
+    let id: UUID
+    let token = UUID()
+}
+
 /// Shared selection/editing state for the note list, plus the click and
 /// keyboard-navigation logic that operates over the panel's current flat
 /// visible (filtered, grouped) order of notes.
@@ -57,6 +68,11 @@ final class SelectionModel: ObservableObject {
     /// (avoids a one-frame window where `HeaderRenameField` is created bound
     /// to an empty string before a separate sync pass fills it in).
     @Published var renameText: String = ""
+
+    /// Set only by keyboard navigation (`moveSelection`), never by clicks or
+    /// select-all, so `PanelView` can scroll the new lead row into view the
+    /// way `NSTableView.scrollRowToVisible` would — and only in that case.
+    @Published private(set) var revealRequest: RevealRequest?
 
     /// The last note explicitly clicked or navigated to; the anchor for
     /// shift-click and shift-arrow range selection.
@@ -220,6 +236,15 @@ final class SelectionModel: ObservableObject {
         } else {
             selectSingle(newID)
         }
+
+        // Always raise a reveal request for the (possibly unchanged) lead
+        // row, including at the top/bottom boundary: `NSTableView` keeps the
+        // selected row visible on every arrow press, and re-requesting the
+        // same row is harmless (`ScrollViewReader.scrollTo` is a no-op if
+        // it's already on screen) while skipping it would leave a boundary
+        // row that scrolled out of view via some other means (e.g. a resize)
+        // stranded off-screen.
+        revealRequest = RevealRequest(id: newID)
     }
 
     // MARK: - Inline editing

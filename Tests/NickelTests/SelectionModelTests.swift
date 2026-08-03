@@ -240,6 +240,91 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertTrue(selection.filteredNotes.isEmpty)
     }
 
+    // MARK: - Keyboard reveal (scroll-into-view)
+
+    func testMoveSelectionSetsRevealRequestToNewLeadID() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+
+        selection.selectSingle(ids[0])
+        XCTAssertNil(selection.revealRequest)
+
+        selection.moveSelection(direction: 1, extend: false)
+        XCTAssertEqual(selection.revealRequest?.id, ids[1])
+    }
+
+    func testRepeatedMoveSelectionCallsProduceDistinctTokens() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.add(text: "c", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+
+        selection.selectSingle(ids[0])
+
+        selection.moveSelection(direction: 1, extend: false)
+        let firstRequest = selection.revealRequest
+
+        selection.moveSelection(direction: 1, extend: false)
+        let secondRequest = selection.revealRequest
+
+        XCTAssertNotEqual(firstRequest, secondRequest)
+        XCTAssertEqual(firstRequest?.id, ids[1])
+        XCTAssertEqual(secondRequest?.id, ids[2])
+    }
+
+    func testMoveSelectionAtBoundaryStillRaisesRevealRequestForUnchangedLead() {
+        // Design choice: a boundary move (already at the last/first row)
+        // still raises a fresh `revealRequest` for the unchanged lead, so a
+        // row that scrolled out of view by some other means (e.g. a panel
+        // resize) gets pulled back on screen. `ScrollViewReader.scrollTo` is
+        // a no-op when the row's already visible, so this is harmless.
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+
+        selection.selectSingle(ids[1]) // already at the last note
+
+        selection.moveSelection(direction: 1, extend: false)
+
+        XCTAssertEqual(selection.selectedIDs, [ids[1]])
+        XCTAssertEqual(selection.revealRequest?.id, ids[1])
+    }
+
+    func testMoveSelectionExtendAlsoSetsRevealRequestToLead() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+
+        selection.selectSingle(ids[0])
+        selection.moveSelection(direction: 1, extend: true)
+
+        XCTAssertEqual(selection.revealRequest?.id, ids[1])
+    }
+
+    func testClickDoesNotSetRevealRequest() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+
+        selection.handleClick(on: idA, shift: false, command: false)
+        selection.handleClick(on: idB, shift: false, command: false)
+        selection.handleClick(on: idB, shift: true, command: false)
+        selection.toggle(idA)
+
+        XCTAssertNil(selection.revealRequest)
+    }
+
+    func testSelectAllDoesNotSetRevealRequest() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+
+        selection.selectAllNotes()
+
+        XCTAssertNil(selection.revealRequest)
+    }
+
     // MARK: - Select all
 
     func testSelectAllNotesSelectsEverythingWithAnchorFirstAndLeadLast() {

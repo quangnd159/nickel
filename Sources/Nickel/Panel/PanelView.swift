@@ -289,81 +289,93 @@ struct PanelView: View {
             }
 
             GeometryReader { geometry in
-                ScrollView {
-                    ZStack(alignment: .top) {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture { handleBackgroundClick() }
+                ScrollViewReader { scrollProxy in
+                    ScrollView {
+                        ZStack(alignment: .top) {
+                            Color.clear
+                                .contentShape(Rectangle())
+                                .onTapGesture { handleBackgroundClick() }
 
-                        if let activeSection = store.activeSection {
-                            let items = selection.notes(in: activeSection)
-                            if items.isEmpty {
-                                emptySectionHint
-                                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                            if let activeSection = store.activeSection {
+                                let items = selection.notes(in: activeSection)
+                                if items.isEmpty {
+                                    emptySectionHint
+                                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                                        .transition(sectionSwitchTransition)
+                                } else {
+                                    // Not lazy: see the comment on the Show All
+                                    // `VStack` below for why.
+                                    VStack(alignment: .leading, spacing: 10) {
+                                        ForEach(items) { note in
+                                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                                .transition(rowTransition)
+                                        }
+                                    }
                                     .transition(sectionSwitchTransition)
+                                    .animation(rowSpring, value: selection.visibleOrder)
+                                    .animation(rowSpring, value: selection.expandedIDs)
+                                }
                             } else {
-                                // Not lazy: see the comment on the Show All
-                                // `VStack` below for why.
+                                // Deliberately not lazy: rows migrate between the
+                                // ungrouped and per-section ForEach loops when a
+                                // note is moved into a section, and LazyVStack's
+                                // per-identity cell cache would keep serving the
+                                // pre-move Note snapshot (stale done-checkbox).
+                                // These lists are small, so laziness buys nothing.
+                                let grouped = selection.filteredNotesBySection
                                 VStack(alignment: .leading, spacing: 10) {
-                                    ForEach(items) { note in
+                                    ForEach(grouped[String?.none] ?? []) { note in
                                         NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                             .transition(rowTransition)
+                                    }
+
+                                    // Every section's header renders here, even
+                                    // an empty one: with `sections` as the source
+                                    // of truth for existence, Show All is where
+                                    // an empty section can be found, reordered,
+                                    // or deleted. No per-section empty hint
+                                    // though — that would clutter a view meant to
+                                    // stay a clean overview.
+                                    ForEach(store.sections, id: \.self) { sectionName in
+                                        sectionHeader(sectionName)
+                                            .padding(.top, 12)
+                                            .transition(rowTransition)
+
+                                        ForEach(grouped[sectionName] ?? []) { note in
+                                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
+                                                .transition(rowTransition)
+                                        }
                                     }
                                 }
                                 .transition(sectionSwitchTransition)
                                 .animation(rowSpring, value: selection.visibleOrder)
+                                // Expand/collapse changes a row's height without
+                                // adding or removing it from `visibleOrder`, so
+                                // it needs its own `.animation` keyed off
+                                // `expandedIDs` to pick up the same spring.
                                 .animation(rowSpring, value: selection.expandedIDs)
+                                // Reordering two sections that are both empty (or
+                                // otherwise don't change which note ids are
+                                // visible) wouldn't otherwise change
+                                // `visibleOrder`, so the headers need their own
+                                // animation keyed off section order directly.
+                                .animation(rowSpring, value: store.sections)
                             }
-                        } else {
-                            // Deliberately not lazy: rows migrate between the
-                            // ungrouped and per-section ForEach loops when a
-                            // note is moved into a section, and LazyVStack's
-                            // per-identity cell cache would keep serving the
-                            // pre-move Note snapshot (stale done-checkbox).
-                            // These lists are small, so laziness buys nothing.
-                            let grouped = selection.filteredNotesBySection
-                            VStack(alignment: .leading, spacing: 10) {
-                                ForEach(grouped[String?.none] ?? []) { note in
-                                    NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                        .transition(rowTransition)
-                                }
-
-                                // Every section's header renders here, even
-                                // an empty one: with `sections` as the source
-                                // of truth for existence, Show All is where
-                                // an empty section can be found, reordered,
-                                // or deleted. No per-section empty hint
-                                // though — that would clutter a view meant to
-                                // stay a clean overview.
-                                ForEach(store.sections, id: \.self) { sectionName in
-                                    sectionHeader(sectionName)
-                                        .padding(.top, 12)
-                                        .transition(rowTransition)
-
-                                    ForEach(grouped[sectionName] ?? []) { note in
-                                        NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                            .transition(rowTransition)
-                                    }
-                                }
-                            }
-                            .transition(sectionSwitchTransition)
-                            .animation(rowSpring, value: selection.visibleOrder)
-                            // Expand/collapse changes a row's height without
-                            // adding or removing it from `visibleOrder`, so
-                            // it needs its own `.animation` keyed off
-                            // `expandedIDs` to pick up the same spring.
-                            .animation(rowSpring, value: selection.expandedIDs)
-                            // Reordering two sections that are both empty (or
-                            // otherwise don't change which note ids are
-                            // visible) wouldn't otherwise change
-                            // `visibleOrder`, so the headers need their own
-                            // animation keyed off section order directly.
-                            .animation(rowSpring, value: store.sections)
                         }
+                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
                     }
-                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    // Keyboard navigation (arrow keys) keeps the lead row
+                    // visible, matching `NSTableView.scrollRowToVisible`: no
+                    // anchor (scrolls the minimal distance to the nearest
+                    // edge) and no animation (AppKit's keyboard-nav scrolling
+                    // is instant). Clicks and select-all don't set
+                    // `revealRequest`, so they don't trigger this.
+                    .onChange(of: selection.revealRequest) { _, request in
+                        guard let request else { return }
+                        scrollProxy.scrollTo(request.id)
+                    }
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
         // Drives both the pinned header's appearance/disappearance and the
