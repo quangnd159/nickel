@@ -45,13 +45,14 @@ final class PasteboardWriterTests: XCTestCase {
 
         XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
         let item = pasteboard.pasteboardItems![0]
+        XCTAssertEqual(item.types, [.string])
         XCTAssertEqual(item.string(forType: .string), "hello world")
         XCTAssertNil(item.string(forType: .fileURL))
     }
 
-    // MARK: - image attachment
+    // MARK: - image attachment: rich item first, then unchanged attachment item
 
-    func testImageAttachmentProducesFileURLAndImageDataItemPlusTrailingString() throws {
+    func testImageAttachmentProducesRichItemThenFileURLAndImageDataItem() throws {
         let source = tempDirectory.appendingPathComponent("shot.png")
         try pngData().write(to: source)
 
@@ -66,7 +67,15 @@ final class PasteboardWriterTests: XCTestCase {
         let items = pasteboard.pasteboardItems!
         XCTAssertEqual(items.count, 2)
 
-        let attachmentItem = items[0]
+        // First item: the rich representation, carrying rtfd + rtf + string.
+        let richItem = items[0]
+        XCTAssertTrue(richItem.types.contains(.rtfd))
+        XCTAssertTrue(richItem.types.contains(.rtf))
+        XCTAssertTrue(richItem.types.contains(.string))
+        XCTAssertEqual(richItem.string(forType: .string), "a screenshot\nshot.png")
+
+        // Second item: the unchanged per-attachment item.
+        let attachmentItem = items[1]
         XCTAssertTrue(attachmentItem.types.contains(.fileURL))
         XCTAssertTrue(attachmentItem.types.contains(NSPasteboard.PasteboardType("public.png")))
         XCTAssertEqual(attachmentItem.data(forType: NSPasteboard.PasteboardType("public.png")), pngData())
@@ -74,14 +83,41 @@ final class PasteboardWriterTests: XCTestCase {
         let note = store.notes[0]
         let expectedURL = store.url(for: note.attachments[0], in: note)
         XCTAssertEqual(attachmentItem.string(forType: .fileURL), expectedURL.absoluteString)
+    }
 
-        let textItem = items[1]
-        XCTAssertEqual(textItem.string(forType: .string), "a screenshot\nshot.png")
+    func testImageAttachmentRTFDRoundTripsTextAndImageBytes() throws {
+        let source = tempDirectory.appendingPathComponent("shot.png")
+        try pngData().write(to: source)
+
+        _ = store.add(
+            text: "a screenshot",
+            attachments: [(sourceURL: source, filename: "shot.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+
+        PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard)
+
+        let richItem = pasteboard.pasteboardItems![0]
+        let rtfdData = try XCTUnwrap(richItem.data(forType: .rtfd))
+        let decoded = try XCTUnwrap(NSAttributedString(rtfd: rtfdData, documentAttributes: nil))
+
+        XCTAssertTrue(decoded.string.hasPrefix("a screenshot"))
+
+        var foundAttachment: NSTextAttachment?
+        decoded.enumerateAttribute(.attachment, in: NSRange(location: 0, length: decoded.length)) { value, _, _ in
+            if let attachment = value as? NSTextAttachment {
+                foundAttachment = attachment
+            }
+        }
+        let attachment = try XCTUnwrap(foundAttachment)
+        let wrapper = try XCTUnwrap(attachment.fileWrapper)
+        XCTAssertEqual(wrapper.preferredFilename, "shot.png")
+        XCTAssertEqual(wrapper.regularFileContents, pngData())
     }
 
     // MARK: - non-image attachment
 
-    func testNonImageAttachmentProducesFileURLOnlyItem() throws {
+    func testNonImageAttachmentProducesStringOnlyRichItemThenFileURLOnlyItem() throws {
         let source = tempDirectory.appendingPathComponent("notes.txt")
         try "hello".write(to: source, atomically: true, encoding: .utf8)
 
@@ -96,8 +132,65 @@ final class PasteboardWriterTests: XCTestCase {
         let items = pasteboard.pasteboardItems!
         XCTAssertEqual(items.count, 2)
 
-        let attachmentItem = items[0]
+        // No image anywhere in the batch, so the rich item degrades to a
+        // plain string, matching pre-RTFD behavior.
+        let richItem = items[0]
+        XCTAssertEqual(richItem.types, [.string])
+        XCTAssertEqual(richItem.string(forType: .string), "notes.txt")
+
+        let attachmentItem = items[1]
         XCTAssertEqual(attachmentItem.types, [.fileURL])
+    }
+
+    // MARK: - mixed image + non-image attachments in one batch
+
+    func testMixedImageAndNonImageAttachmentsInBatchProducesRichItemAndUnchangedAttachmentItems() throws {
+        let imageSource = tempDirectory.appendingPathComponent("shot.png")
+        try pngData().write(to: imageSource)
+        let docSource = tempDirectory.appendingPathComponent("notes.txt")
+        try "hello".write(to: docSource, atomically: true, encoding: .utf8)
+
+        _ = store.add(
+            text: "a screenshot",
+            attachments: [(sourceURL: imageSource, filename: "shot.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+        _ = store.add(
+            text: "",
+            attachments: [(sourceURL: docSource, filename: "notes.txt", contentType: "public.text")],
+            sourceApp: nil
+        )
+
+        PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard)
+
+        let items = pasteboard.pasteboardItems!
+        // rich item + 2 attachment items
+        XCTAssertEqual(items.count, 3)
+
+        let richItem = items[0]
+        XCTAssertTrue(richItem.types.contains(.rtfd))
+        XCTAssertEqual(richItem.string(forType: .string), "a screenshot\nshot.png\n\nnotes.txt")
+
+        let rtfdData = try XCTUnwrap(richItem.data(forType: .rtfd))
+        let decoded = try XCTUnwrap(NSAttributedString(rtfd: rtfdData, documentAttributes: nil))
+
+        var attachmentCount = 0
+        decoded.enumerateAttribute(.attachment, in: NSRange(location: 0, length: decoded.length)) { value, _, _ in
+            if value != nil { attachmentCount += 1 }
+        }
+        // Exactly one embedded NSTextAttachment (the image); the non-image
+        // attachment contributes plain filename text instead.
+        XCTAssertEqual(attachmentCount, 1)
+        XCTAssertTrue(decoded.string.contains("notes.txt"))
+
+        // Per-attachment items are unchanged: image gets fileURL + image
+        // data, non-image gets fileURL only.
+        let imageAttachmentItem = items[1]
+        XCTAssertTrue(imageAttachmentItem.types.contains(.fileURL))
+        XCTAssertTrue(imageAttachmentItem.types.contains(NSPasteboard.PasteboardType("public.png")))
+
+        let docAttachmentItem = items[2]
+        XCTAssertEqual(docAttachmentItem.types, [.fileURL])
     }
 
     // MARK: - missing file
@@ -121,7 +214,13 @@ final class PasteboardWriterTests: XCTestCase {
 
         let items = pasteboard.pasteboardItems!
         XCTAssertEqual(items.count, 2)
-        let attachmentItem = items[0]
+
+        // Unreadable file means no NSTextAttachment gets embedded, so the
+        // rich item degrades to plain string, same as the no-image path.
+        let richItem = items[0]
+        XCTAssertEqual(richItem.types, [.string])
+
+        let attachmentItem = items[1]
         XCTAssertEqual(attachmentItem.types, [.fileURL])
         XCTAssertEqual(attachmentItem.string(forType: .fileURL), store.url(for: attachment, in: note).absoluteString)
     }
