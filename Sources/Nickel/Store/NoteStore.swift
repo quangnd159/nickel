@@ -101,9 +101,15 @@ final class NoteStore: ObservableObject {
     /// failed copy just skips that attachment (logged) rather than losing the
     /// whole note. `text` may be empty — attachment-only notes are valid.
     /// Always lands in the active section, like `add(text:sourceApp:)`.
-    func add(text: String, attachments: [(sourceURL: URL, filename: String, contentType: String)], sourceApp: String?) {
+    ///
+    /// Returns the indices (into `attachments`) of inputs that failed to
+    /// copy, so the caller can keep those staged rather than discarding
+    /// their only copy (e.g. a pasted screenshot that lives only in a temp
+    /// staging directory).
+    @discardableResult
+    func add(text: String, attachments: [(sourceURL: URL, filename: String, contentType: String)], sourceApp: String?) -> [Int] {
         let noteID = UUID()
-        let savedAttachments = copyAttachments(attachments, intoNoteDirectoryFor: noteID)
+        let (savedAttachments, failedIndices) = copyAttachments(attachments, intoNoteDirectoryFor: noteID)
 
         let note = Note(
             id: noteID,
@@ -116,27 +122,30 @@ final class NoteStore: ObservableObject {
         )
         notes.append(note)
         scheduleSave()
+        return failedIndices
     }
 
     /// Copies each `(sourceURL, filename, contentType)` input into
     /// `noteID`'s attachments directory (creating it on demand), returning
-    /// the `Attachment`s that copied successfully.
+    /// the `Attachment`s that copied successfully alongside the indices
+    /// (into `inputs`) of the ones that didn't.
     private func copyAttachments(
         _ inputs: [(sourceURL: URL, filename: String, contentType: String)],
         intoNoteDirectoryFor noteID: UUID
-    ) -> [Attachment] {
-        guard !inputs.isEmpty else { return [] }
+    ) -> (saved: [Attachment], failedIndices: [Int]) {
+        guard !inputs.isEmpty else { return ([], []) }
 
         let destinationDirectory = attachmentsDirectory.appendingPathComponent(noteID.uuidString, isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
         } catch {
             NSLog("NoteStore: failed to create attachments directory: \(error)")
-            return []
+            return ([], Array(inputs.indices))
         }
 
         var saved: [Attachment] = []
-        for input in inputs {
+        var failedIndices: [Int] = []
+        for (index, input) in inputs.enumerated() {
             let attachment = Attachment(id: UUID(), filename: input.filename, contentType: input.contentType)
             let destination = destinationDirectory.appendingPathComponent(attachmentFilename(attachment))
             do {
@@ -144,9 +153,10 @@ final class NoteStore: ObservableObject {
                 saved.append(attachment)
             } catch {
                 NSLog("NoteStore: failed to copy attachment \"\(input.filename)\": \(error)")
+                failedIndices.append(index)
             }
         }
-        return saved
+        return (saved, failedIndices)
     }
 
     func update(id: UUID, text: String) {

@@ -63,6 +63,40 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(store.notes.count, 2)
     }
 
+    func testAddReportsFailedAttachmentIndices() throws {
+        let sourceA = tempDirectory.appendingPathComponent("a.txt")
+        try "fileA".write(to: sourceA, atomically: true, encoding: .utf8)
+        let missingSource = tempDirectory.appendingPathComponent("missing.txt")
+
+        let failedIndices = store.add(
+            text: "hello",
+            attachments: [
+                (sourceURL: sourceA, filename: "a.txt", contentType: "public.text"),
+                (sourceURL: missingSource, filename: "missing.txt", contentType: "public.text"),
+            ],
+            sourceApp: nil
+        )
+
+        XCTAssertEqual(failedIndices, [1])
+        let note = store.notes[0]
+        XCTAssertEqual(note.attachments.count, 1)
+        XCTAssertEqual(note.attachments[0].filename, "a.txt")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.url(for: note.attachments[0], in: note).path))
+    }
+
+    func testAddAllAttachmentsSucceedReturnsEmpty() throws {
+        let sourceA = tempDirectory.appendingPathComponent("a.txt")
+        try "fileA".write(to: sourceA, atomically: true, encoding: .utf8)
+
+        let failedIndices = store.add(
+            text: "hello",
+            attachments: [(sourceURL: sourceA, filename: "a.txt", contentType: "public.text")],
+            sourceApp: nil
+        )
+
+        XCTAssertEqual(failedIndices, [])
+    }
+
     // MARK: - toggleDone
 
     func testToggleDoneTogglesGivenIDs() {
