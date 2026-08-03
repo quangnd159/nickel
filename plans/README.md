@@ -17,14 +17,14 @@ TODO plans are drift-free and executable as written. Round 1 re-verified:
 |------|-------|----------|--------|------------|--------|
 | 015  | Make store load failures non-destructive (sweep gate + backups) | P1 | S | — | DONE (merged 2026-08-03, verified on main: 81/81) |
 | 016  | Stop merge from destroying unmoved donor attachments | P1 | S | 015 (soft) | DONE (merged 2026-08-03) |
-| 017  | Keep failed attachment copies staged in the composer | P1 | S–M | 016 (soft) | IN PROGRESS (dispatched 2026-08-03) |
+| 017  | Keep failed attachment copies staged in the composer | P1 | S–M | 016 (soft) | DONE (merged 2026-08-03) |
 | 018  | Surface note-save failures in the panel | P2 | M | 017 (soft) | TODO |
 | 019  | Bound how long the save debounce can defer a write | P2 | S | 018 (soft) | TODO |
 | 020  | Make case-only section renames work | P1 | S | 019 (soft) | TODO |
 | 021  | Replace off-main-thread NSFontManager with descriptor traits | P1 | S | — | DONE (merged 2026-08-03) |
-| 022  | Harden the captured-HTML sanitizer (charset + SVG/background) | P2 | S–M | 021 (soft) | IN PROGRESS (dispatched 2026-08-03) |
+| 022  | Harden the captured-HTML sanitizer (charset + SVG/background) | P2 | S–M | 021 (soft) | DONE (merged 2026-08-03) |
 | 023  | Search matches attachment filenames | P2 | S | — | DONE (merged 2026-08-03) |
-| 024  | Cut per-row/per-render O(N) rebuilds in the note list | P2 | M | 023 (soft) | IN PROGRESS (dispatched 2026-08-03) |
+| 024  | Cut per-row/per-render O(N) rebuilds in the note list | P2 | M | 023 (soft) | DONE (merged 2026-08-03) |
 | 025  | Update check: honest no-releases case + tested comparator | P3 | S | — | DONE (merged 2026-08-03) |
 
 All "soft" dependencies are file-conflict ordering, not logical
