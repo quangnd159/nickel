@@ -789,8 +789,12 @@ struct PanelView: View {
         // file URL), so provider inspection can't tell a dragged text file
         // from dragged text. The drag pasteboard always carries the real
         // file URLs, for every file type.
-        let draggedFileURLs = (NSPasteboard(name: .drag)
-            .readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        // `filePathURL` resolves the file-reference form drags carry
+        // (`file:///.file/id=…`), which has no usable last path component
+        // for the chip's filename/icon.
+        let draggedFileURLs = ((NSPasteboard(name: .drag)
+            .readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? [])
+            .map { ($0 as NSURL).filePathURL ?? $0 }
         if !draggedFileURLs.isEmpty {
             for url in draggedFileURLs {
                 pendingAttachments.append(StagedAttachment(sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
