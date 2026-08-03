@@ -22,24 +22,40 @@ import UniformTypeIdentifiers
 ///    bytes under the concrete UTI when it's an image — for file-aware or
 ///    image-data-only consumers (Finder, browser `clipboardData.files`).
 enum PasteboardWriter {
+    /// The built content behind a copy, split so callers besides
+    /// `copy`/`copyAsList` can write *partial* layouts from the same
+    /// derived content instead of re-deriving it. `SequentialPasteCoordinator`
+    /// is the reason this exists: it stages the attachments-only layout on
+    /// copy, then later swaps in the text-only layout for a synthetic paste,
+    /// both from whatever batch was actually copied.
+    struct Layout {
+        let text: String
+        let rich: NSAttributedString
+        let attachmentItems: [NSPasteboardItem]
+    }
+
     /// Joins the notes' text with a blank line between each, in the order
     /// given (which should be visible order, not selection/insertion order).
     /// Attachment-only notes contribute their filename(s) in place of text;
     /// notes with both contribute text then filenames. Alongside that
     /// combined string, every attachment across the selection is written as
     /// its own pasteboard item, in the same order.
-    static func copy(notes: [Note], store: NoteStore, pasteboard: NSPasteboard = .general) {
-        guard !notes.isEmpty else { return }
+    @discardableResult
+    static func copy(notes: [Note], store: NoteStore, pasteboard: NSPasteboard = .general) -> Layout? {
+        guard !notes.isEmpty else { return nil }
         let text = notes.map { line(for: $0) }.joined(separator: "\n\n")
         let rich = joined(notes.map { attributedLine(for: $0, store: store) }, separator: "\n\n")
-        write(text: text, rich: rich, attachmentsIn: notes, store: store, pasteboard: pasteboard)
+        let layout = makeLayout(text: text, rich: rich, notes: notes, store: store)
+        write(layout, pasteboard: pasteboard)
+        return layout
     }
 
     /// Renders each note as a "- " bullet, with any internal newlines
     /// indented two spaces so wrapped lines stay part of the same bullet.
     /// Attachment-only notes bullet their filename(s) instead of body text.
-    static func copyAsList(notes: [Note], store: NoteStore, pasteboard: NSPasteboard = .general) {
-        guard !notes.isEmpty else { return }
+    @discardableResult
+    static func copyAsList(notes: [Note], store: NoteStore, pasteboard: NSPasteboard = .general) -> Layout? {
+        guard !notes.isEmpty else { return nil }
         let lines = notes.map { note in
             "- " + line(for: note).replacingOccurrences(of: "\n", with: "\n  ")
         }
@@ -50,7 +66,9 @@ enum PasteboardWriter {
             return bulleted
         }
         let rich = joined(richLines, separator: "\n")
-        write(text: text, rich: rich, attachmentsIn: notes, store: store, pasteboard: pasteboard)
+        let layout = makeLayout(text: text, rich: rich, notes: notes, store: store)
+        write(layout, pasteboard: pasteboard)
+        return layout
     }
 
     /// A note's textual representation for the combined string: its text,
@@ -110,11 +128,8 @@ enum PasteboardWriter {
         return result
     }
 
-    /// Writes the rich item first, then one `NSPasteboardItem` per
-    /// attachment (visible order). With no image attachments anywhere in
-    /// the batch, the rich item degrades to a lone plain-string item, so a
-    /// text-only copy stays byte-identical to writing just the string, as
-    /// before this feature existed.
+    /// Builds a `Layout`'s attachment items (visible order) from the same
+    /// note batch `line`/`attributedLine` already walked for `text`/`rich`.
     ///
     /// Every attachment item carries its file URL under `.fileURL`. If the
     /// attachment is an image, that *same* item also carries the image's raw
@@ -122,14 +137,41 @@ enum PasteboardWriter {
     /// whichever representation it understands (file-aware apps the URL,
     /// chat apps the image data, matching how a Finder/screenshot paste
     /// looks) without ever seeing the picture as two separate attachments.
-    private static func write(text: String, rich: NSAttributedString, attachmentsIn notes: [Note], store: NoteStore, pasteboard: NSPasteboard) {
-        pasteboard.clearContents()
-
+    private static func makeLayout(text: String, rich: NSAttributedString, notes: [Note], store: NoteStore) -> Layout {
         let attachmentItems = notes.flatMap { note in
             note.attachments.map { item(forAttachmentAt: store.url(for: $0, in: note)) }
         }
+        return Layout(text: text, rich: rich, attachmentItems: attachmentItems)
+    }
 
-        pasteboard.writeObjects([richItem(for: rich, fallbackText: text)] + attachmentItems)
+    /// Writes the full layout: the rich item first, then one
+    /// `NSPasteboardItem` per attachment. With no image attachments anywhere
+    /// in the batch, the rich item degrades to a lone plain-string item, so
+    /// a text-only copy stays byte-identical to writing just the string, as
+    /// before this feature existed.
+    static func write(_ layout: Layout, pasteboard: NSPasteboard = .general) {
+        pasteboard.clearContents()
+        pasteboard.writeObjects([richItem(for: layout.rich, fallbackText: layout.text)] + layout.attachmentItems)
+    }
+
+    /// Writes just the per-attachment items, no rich/text item at all. Used
+    /// by `SequentialPasteCoordinator` to stage a paste that only delivers
+    /// attachments (a real ⌘V reading this gets images/files but no text).
+    static func writeAttachmentsOnly(_ layout: Layout, pasteboard: NSPasteboard = .general) {
+        pasteboard.clearContents()
+        guard !layout.attachmentItems.isEmpty else { return }
+        pasteboard.writeObjects(layout.attachmentItems)
+    }
+
+    /// Writes a single plain-string item carrying the layout's combined
+    /// text, no rich or attachment items. Used by `SequentialPasteCoordinator`
+    /// for the synthetic second paste, so a chat composer that only reads
+    /// one flavor per paste gets the text on its own.
+    static func writeTextOnly(_ layout: Layout, pasteboard: NSPasteboard = .general) {
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(layout.text, forType: .string)
+        pasteboard.writeObjects([item])
     }
 
     /// Builds the first pasteboard item: RTFD + RTF + plain string when the

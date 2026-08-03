@@ -10,15 +10,22 @@ enum ShiftSide {
 /// cycles, each undisturbed by any other key or modifier, within 350ms of each other.
 /// The two taps must land on the *same* side (both left or both right); a tap on the
 /// other side starts a new sequence for that side instead of completing this one.
+///
+/// Also reports every ⌘V keyDown it sees via `onCommandV`, for
+/// `SequentialPasteCoordinator`: it needs a system-wide ⌘V observer, and
+/// this monitor already taps `.keyDown` globally and locally, so it's
+/// reused rather than installing a second tap for the same event type.
 final class HotkeyMonitor {
     static let shared = HotkeyMonitor()
 
     var onDoubleShift: ((ShiftSide) -> Void)?
+    var onCommandV: ((NSEvent) -> Void)?
 
     private static let relevantModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
     private static let maxTapInterval: TimeInterval = 0.35
     private static let leftShiftKeyCode: UInt16 = 56
     private static let rightShiftKeyCode: UInt16 = 60
+    private static let vKeyCode: UInt16 = 9
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -72,17 +79,21 @@ final class HotkeyMonitor {
         case .flagsChanged:
             handleFlagsChanged(event)
         case .keyDown:
-            handleKeyDown()
+            handleKeyDown(event)
         default:
             break
         }
     }
 
-    private func handleKeyDown() {
+    private func handleKeyDown(_ event: NSEvent) {
         // A real key press while Shift is held alone means Shift is being used as a
         // modifier (typing a capital letter, ⌘⇧C, etc.), not a plain tap.
         if shiftIsDownAlone {
             currentTapDisqualified = true
+        }
+
+        if event.keyCode == Self.vKeyCode && event.modifierFlags.contains(.command) {
+            onCommandV?(event)
         }
     }
 

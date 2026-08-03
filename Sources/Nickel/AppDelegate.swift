@@ -37,6 +37,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         HotkeyMonitor.shared.onDoubleShift = { [weak self] side in self?.handleDoubleShift(side) }
+        HotkeyMonitor.shared.onCommandV = { [weak self] event in self?.handleCommandV(event) }
         startHotkeyMonitorOrPromptForAccess()
 
         panel.toggle()
@@ -76,6 +77,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .left:
             captureSelectedText()
         }
+    }
+
+    /// Feeds every ⌘V keyDown `HotkeyMonitor` observes to
+    /// `SequentialPasteCoordinator`, translating the raw `NSEvent` into the
+    /// three booleans its testable `handleCommandV` needs: whether this is
+    /// our own synthetic paste looping back (via the `eventSourceUserData`
+    /// marker), a key-repeat, or typed while Nickel itself is frontmost
+    /// (e.g. into the search field, which isn't the "paste into another
+    /// app" this coordinator exists for).
+    private func handleCommandV(_ event: NSEvent) {
+        let isSynthetic = event.cgEvent?.getIntegerValueField(.eventSourceUserData)
+            == SequentialPasteCoordinator.syntheticEventUserData
+        let frontmostAppIsNickel = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == Bundle.main.bundleIdentifier
+        SequentialPasteCoordinator.shared.handleCommandV(
+            isSynthetic: isSynthetic,
+            isRepeat: event.isARepeat,
+            frontmostAppIsNickel: frontmostAppIsNickel
+        )
     }
 
     private func captureSelectedText() {

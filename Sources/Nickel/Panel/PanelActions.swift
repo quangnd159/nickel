@@ -47,15 +47,21 @@ final class PanelActions: ObservableObject {
     // MARK: - Copy
 
     func copy() {
-        PasteboardWriter.copy(notes: selectedNotes, store: store)
+        let notes = selectedNotes
+        guard let layout = PasteboardWriter.copy(notes: notes, store: store) else { return }
+        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout)
     }
 
     func copyAsList() {
-        PasteboardWriter.copyAsList(notes: selectedNotes, store: store)
+        let notes = selectedNotes
+        guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store) else { return }
+        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout)
     }
 
     func copyAllAsList() {
-        PasteboardWriter.copyAsList(notes: allVisibleNotes, store: store)
+        let notes = allVisibleNotes
+        guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store) else { return }
+        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout)
     }
 
     // MARK: - Done / edit / merge / delete
