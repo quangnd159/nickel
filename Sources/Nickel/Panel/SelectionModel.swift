@@ -221,7 +221,9 @@ final class SelectionModel: ObservableObject {
 
         guard let referenceID = leadID ?? anchorID ?? selectedIDs.first,
               let currentIndex = visibleOrder.firstIndex(of: referenceID) else {
-            selectSingle(direction < 0 ? visibleOrder[visibleOrder.count - 1] : visibleOrder[0])
+            let entryID = direction < 0 ? visibleOrder[visibleOrder.count - 1] : visibleOrder[0]
+            selectSingle(entryID)
+            revealRequest = RevealRequest(id: entryID)
             return
         }
 

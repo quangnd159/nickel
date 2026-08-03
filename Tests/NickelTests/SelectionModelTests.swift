@@ -291,6 +291,17 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertEqual(selection.revealRequest?.id, ids[1])
     }
 
+    func testMoveSelectionWithNoSelectionRevealsTheEntryRow() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+
+        selection.moveSelection(direction: -1, extend: false)
+
+        XCTAssertEqual(selection.selectedIDs, [ids[1]])
+        XCTAssertEqual(selection.revealRequest?.id, ids[1])
+    }
+
     func testMoveSelectionExtendAlsoSetsRevealRequestToLead() {
         store.add(text: "a", sourceApp: nil)
         store.add(text: "b", sourceApp: nil)
