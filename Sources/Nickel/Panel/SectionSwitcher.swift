@@ -2,21 +2,41 @@ import SwiftUI
 import AppKit
 
 /// Posted by `FloatingPanel` when ⌘K is pressed, toggling the section
-/// switcher's presentation. Mirrors `.nickelFocusSearch` in
+/// palette's presentation. Mirrors `.nickelFocusSearch` in
 /// `SearchField.swift`, except `PanelView` doesn't focus an existing field in
 /// response — it flips `SelectionModel.presentedOverlay`, which mounts a
 /// fresh `SectionSwitcher` that focuses its own field as it appears.
+///
+/// The palette itself is selection-aware: with nothing selected, ⌘K opens it
+/// in "switch" mode (search-and-switch the active section); with one or more
+/// notes selected, it opens in "move" mode (search-and-move the selection
+/// into a section) instead. Which mode is decided once, by `PanelView`, when
+/// this notification is handled — see the `move` doc comment on
+/// `PanelOverlay.sectionSwitcher`.
 extension Notification.Name {
     static let nickelToggleSectionSwitcher = Notification.Name("NickelToggleSectionSwitcher")
 }
 
-/// The ⌘K command palette: search-and-switch across "Show All", every
-/// section, and (for a query that doesn't already match one) creating a new
-/// section. Presented as a dimmed overlay anchored near the top of the
-/// panel, matching native command palettes.
+/// The ⌘K command palette, in one of two modes (see `move` above):
+///
+/// - **Switch** (`move == false`): search-and-switch across "Show All",
+///   every section, and (for a query that doesn't already match one)
+///   creating a new section.
+/// - **Move** (`move == true`): search-and-move the current selection into a
+///   section — every matching section, plus "No Section" (ungroup), plus the
+///   same "New Section" row — without touching `store.activeSection` or the
+///   selection itself.
+///
+/// Presented as a dimmed overlay anchored near the top of the panel,
+/// matching native command palettes.
 struct SectionSwitcher: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
+    @EnvironmentObject private var actions: PanelActions
+
+    /// Snapshotted by `PanelView` at presentation time; see the `move` doc
+    /// comment on `PanelOverlay.sectionSwitcher`.
+    let move: Bool
 
     @State private var query = ""
     @State private var highlightedIndex = 0
@@ -42,6 +62,7 @@ struct SectionSwitcher: View {
         VStack(spacing: 0) {
             SectionSwitcherField(
                 text: $query,
+                placeholder: move ? "Move to…" : "Switch to…",
                 onMoveUp: { moveHighlight(-1) },
                 onMoveDown: { moveHighlight(1) },
                 onCommit: commitHighlighted,
@@ -116,29 +137,40 @@ struct SectionSwitcher: View {
 
     /// A single row in the palette's result list. `id` is a stable label
     /// (rather than an index) so `ForEach` diffs correctly as the query — and
-    /// therefore the result set — changes on every keystroke.
+    /// therefore the result set — changes on every keystroke. `.showAll` only
+    /// appears in switch mode, `.noSection` only in move mode — see `results`.
     private enum Result: Identifiable {
         case showAll
         case section(String)
+        case noSection
         case newSection(String)
 
         var id: String {
             switch self {
             case .showAll: return "show-all"
             case .section(let name): return "section:\(name)"
+            case .noSection: return "no-section"
             case .newSection(let name): return "new:\(name)"
             }
         }
     }
 
-    /// "Show All" (if it matches), then every matching section, then — for a
-    /// non-empty query that isn't already an exact (case-insensitive) section
-    /// name — a trailing "New Section" row.
+    /// Switch mode: "Show All" (if it matches), then every matching section,
+    /// then — for a non-empty query that isn't already an exact
+    /// (case-insensitive) section name — a trailing "New Section" row.
+    ///
+    /// Move mode: the same list with "No Section" (ungroup the selection)
+    /// standing in for "Show All" — there's no "Show All" destination to
+    /// move notes into.
     private var results: [Result] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         var items: [Result] = []
 
-        if trimmedQuery.isEmpty || "Show All".localizedCaseInsensitiveContains(trimmedQuery) {
+        if move {
+            if trimmedQuery.isEmpty || "No Section".localizedCaseInsensitiveContains(trimmedQuery) {
+                items.append(.noSection)
+            }
+        } else if trimmedQuery.isEmpty || "Show All".localizedCaseInsensitiveContains(trimmedQuery) {
             items.append(.showAll)
         }
 
@@ -157,15 +189,35 @@ struct SectionSwitcher: View {
         switch result {
         case .showAll: return "Show All"
         case .section(let name): return name
+        case .noSection: return "No Section"
         case .newSection(let name): return "New Section: “\(name)”"
         }
     }
 
+    /// Every section every currently-selected note belongs to, collapsed to
+    /// a single value only when it's the same section (or ungrouped, `nil`)
+    /// for *all* of them. The outer optional distinguishes "no uniform
+    /// answer" (empty or mixed selection — no checkmark should show) from
+    /// "uniform answer is ungrouped" (inner `nil` — `.noSection` should
+    /// check).
+    private var uniformSelectionSection: String?? {
+        let sections = Set(store.notes.filter { selection.selectedIDs.contains($0.id) }.map(\.listName))
+        return sections.count == 1 ? sections.first : nil
+    }
+
     private func isActive(_ result: Result) -> Bool {
+        if move {
+            guard let uniformSection = uniformSelectionSection else { return false }
+            switch result {
+            case .section(let name): return uniformSection == name
+            case .noSection: return uniformSection == nil
+            case .showAll, .newSection: return false
+            }
+        }
         switch result {
         case .showAll: return store.activeSection == nil
         case .section(let name): return store.activeSection == name
-        case .newSection: return false
+        case .noSection, .newSection: return false
         }
     }
 
@@ -182,6 +234,28 @@ struct SectionSwitcher: View {
     }
 
     private func commit(_ result: Result) {
+        if move {
+            // Move mode never touches `store.activeSection` or the
+            // selection: `actions.move(toSection:)` only reassigns
+            // `listName` on the already-selected notes. That includes the
+            // "New Section" row — unlike switch mode's `createSection`,
+            // which also activates the new section, `NoteStore.move` already
+            // appends an unrecognized name to `sections` on its own, so
+            // there's nothing else to do here.
+            switch result {
+            case .section(let name):
+                actions.move(toSection: name)
+            case .noSection:
+                actions.move(toSection: nil)
+            case .newSection(let name):
+                actions.move(toSection: name)
+            case .showAll:
+                break // Never produced by `results` in move mode.
+            }
+            dismiss()
+            return
+        }
+
         switch result {
         case .showAll:
             store.setActiveSection(nil)
@@ -189,6 +263,8 @@ struct SectionSwitcher: View {
             store.setActiveSection(name)
         case .newSection(let name):
             store.createSection(named: name)
+        case .noSection:
+            break // Never produced by `results` in switch mode.
         }
         dismiss()
     }

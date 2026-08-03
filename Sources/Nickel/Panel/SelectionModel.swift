@@ -1,10 +1,17 @@
 import Combine
 import Foundation
 
-/// A panel-wide modal overlay: the ⌘K section switcher or the ⌘/ keyboard
+/// A panel-wide modal overlay: the ⌘K section palette or the ⌘/ keyboard
 /// shortcuts card. At most one is presented at a time.
-enum PanelOverlay {
-    case sectionSwitcher
+///
+/// `sectionSwitcher`'s `move` flag is snapshotted once, at presentation time
+/// (see `PanelView`'s `.nickelToggleSectionSwitcher` handler), rather than
+/// derived live from `selectedIDs` while the palette is open: the palette's
+/// own commit handling can clear/leave the selection mid-interaction, and a
+/// live read would risk the palette silently flipping mode out from under
+/// the user while it's open.
+enum PanelOverlay: Equatable {
+    case sectionSwitcher(move: Bool)
     case shortcuts
 }
 

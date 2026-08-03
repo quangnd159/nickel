@@ -60,7 +60,7 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | -------- | ---------------------------------------------------------- |
 | **Left ⇧⇧**  | Capture the current selection                          |
 | **Right ⇧⇧** | Toggle the floating panel                               |
-| **⌘K**   | Switch section                                               |
+| **⌘K**   | Switch section, or move the selection to a section           |
 | **⇧⌘]**  | Next section                                                 |
 | **⇧⌘[**  | Previous section                                             |
 | **⇧⌘R**  | Rename the focused section                                   |

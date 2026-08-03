@@ -121,8 +121,8 @@ struct PanelView: View {
             // `SelectionModel.presentedOverlay`), each dimming/covering
             // everything above. A quick fade+scale reads as "instant" without
             // being an abrupt cut.
-            if selection.presentedOverlay == .sectionSwitcher {
-                SectionSwitcher()
+            if case .sectionSwitcher(let move) = selection.presentedOverlay {
+                SectionSwitcher(move: move)
                     .transition(sectionSwitchTransition)
             }
 
@@ -133,7 +133,7 @@ struct PanelView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .onReceive(NotificationCenter.default.publisher(for: .nickelToggleSectionSwitcher)) { _ in
-            toggleOverlay(.sectionSwitcher)
+            toggleSectionSwitcher()
         }
         .onReceive(NotificationCenter.default.publisher(for: .nickelToggleShortcuts)) { _ in
             toggleOverlay(.shortcuts)
@@ -167,6 +167,24 @@ struct PanelView: View {
     private func toggleOverlay(_ overlay: PanelOverlay) {
         withAnimation(.easeOut(duration: 0.12)) {
             selection.presentedOverlay = (selection.presentedOverlay == overlay) ? nil : overlay
+        }
+    }
+
+    /// ⌘K's toggle: closes the palette if it's already open (in either
+    /// mode), otherwise opens it fresh with `move` snapshotted from whether
+    /// anything is selected *right now* — see the `move` doc comment on
+    /// `PanelOverlay.sectionSwitcher`. Kept separate from `toggleOverlay`
+    /// (rather than passed a computed `PanelOverlay` there) because that
+    /// generic helper's equality-based toggle would treat re-pressing ⌘K
+    /// with a since-changed selection as "opening a different overlay"
+    /// instead of closing the one that's open.
+    private func toggleSectionSwitcher() {
+        withAnimation(.easeOut(duration: 0.12)) {
+            if case .sectionSwitcher = selection.presentedOverlay {
+                selection.presentedOverlay = nil
+            } else {
+                selection.presentedOverlay = .sectionSwitcher(move: !selection.selectedIDs.isEmpty)
+            }
         }
     }
 
