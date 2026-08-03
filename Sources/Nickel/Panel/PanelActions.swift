@@ -24,13 +24,19 @@ final class PanelActions: ObservableObject {
     }
 
     private func notes(for ids: [UUID]) -> [Note] {
-        let byID = Dictionary(uniqueKeysWithValues: store.notes.map { ($0.id, $0) })
+        let byID = Dictionary(store.notes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { byID[$0] }
     }
 
     var allSelectedAreDone: Bool {
-        let notes = selectedNotes
-        return !notes.isEmpty && notes.allSatisfy(\.isDone)
+        let ids = selection.selectedIDs
+        guard !ids.isEmpty else { return false }
+        var sawAny = false
+        for note in store.notes where ids.contains(note.id) {
+            if !note.isDone { return false }
+            sawAny = true
+        }
+        return sawAny
     }
 
     var allSelectedAreExpanded: Bool {
