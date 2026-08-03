@@ -783,9 +783,26 @@ struct PanelView: View {
     private func handleComposerDrop(_ providers: [NSItemProvider]) -> Bool {
         guard !providers.isEmpty else { return false }
 
+        // File drags are detected via AppKit's drag pasteboard, not the
+        // SwiftUI providers: for a text-like file (.txt, .json) SwiftUI
+        // surfaces only the file's *content* type ("public.plain-text", no
+        // file URL), so provider inspection can't tell a dragged text file
+        // from dragged text. The drag pasteboard always carries the real
+        // file URLs, for every file type.
+        let draggedFileURLs = (NSPasteboard(name: .drag)
+            .readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
+        if !draggedFileURLs.isEmpty {
+            for url in draggedFileURLs {
+                pendingAttachments.append(StagedAttachment(sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
+            }
+            showAttachmentToast(count: draggedFileURLs.count)
+            return true
+        }
+
+        // Not a file drag, so text content (a dragged selection) inserts
+        // into the composer text.
         if providers.count == 1, let provider = providers.first,
-           provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier),
-           !provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+           provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
             provider.loadObject(ofClass: NSString.self) { object, _ in
                 guard let text = object as? String, !text.isEmpty else { return }
                 DispatchQueue.main.async {
@@ -863,17 +880,6 @@ struct PanelView: View {
         from provider: NSItemProvider,
         completion: @escaping ((sourceURL: URL, filename: String, contentType: String)?) -> Void
     ) {
-        if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else {
-                    completion(nil)
-                    return
-                }
-                completion((sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
-            }
-            return
-        }
-
         let imageTypes: [UTType] = [.png, .tiff, .image]
         guard let imageType = imageTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
             completion(nil)
