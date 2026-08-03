@@ -18,7 +18,13 @@ enum MarkdownConverter {
         // with it internally and times out when called from elsewhere), but
         // capture runs on a background queue — hop over if needed.
         let sanitized = strippingRemoteResources(data)
-        let parse = { NSAttributedString(html: sanitized, documentAttributes: nil) }
+        let parse = {
+            NSAttributedString(
+                html: sanitized,
+                options: [.characterEncoding: String.Encoding.utf8.rawValue],
+                documentAttributes: nil
+            )
+        }
         let attributed = Thread.isMainThread ? parse() : DispatchQueue.main.sync(execute: parse)
         guard let attributed else { return nil }
         return markdown(from: attributed)
@@ -37,23 +43,14 @@ enum MarkdownConverter {
     /// fine here: the goal is only to remove fetch triggers from importer
     /// input, not to parse HTML correctly. An over-broad match can degrade
     /// formatting fidelity, but it never reintroduces a fetch.
-    private static func strippingRemoteResources(_ data: Data) -> Data {
-        let encoding: String.Encoding
-        let text: String
-        if let utf8 = String(data: data, encoding: .utf8) {
-            encoding = .utf8
-            text = utf8
-        } else if let latin1 = String(data: data, encoding: .isoLatin1) {
-            encoding = .isoLatin1
-            text = latin1
-        } else {
-            return data
-        }
+    static func strippingRemoteResources(_ data: Data) -> Data {
+        guard let decoded = decodedHTML(data) else { return data }
+        let text = decoded.text
 
         var sanitized = text
 
         // 1. Void/empty resource elements — remove the tag entirely.
-        for tag in ["img", "source", "track", "embed", "input"] {
+        for tag in ["img", "image", "source", "track", "embed", "input"] {
             sanitized = sanitized.replacingOccurrences(
                 of: "<\(tag)\\b[^>]*>",
                 with: "",
@@ -62,7 +59,7 @@ enum MarkdownConverter {
         }
 
         // 2. Paired resource elements — remove the tag and its content.
-        for tag in ["iframe", "object", "video", "audio", "script"] {
+        for tag in ["iframe", "object", "video", "audio", "script", "svg"] {
             sanitized = sanitized.replacingOccurrences(
                 of: "(?s)<\(tag)\\b[^>]*>.*?</\(tag)>",
                 with: "",
@@ -90,8 +87,48 @@ enum MarkdownConverter {
             options: [.regularExpression, .caseInsensitive]
         )
 
-        guard let reencoded = sanitized.data(using: encoding) else { return data }
+        // 5. background= attributes (body/table/td) that point at remote URLs.
+        sanitized = sanitized.replacingOccurrences(
+            of: "background\\s*=\\s*[\"']?https?://[^\"'\\s>]*[\"']?",
+            with: "",
+            options: [.regularExpression, .caseInsensitive]
+        )
+
+        // Always re-encode as UTF-8: the source encoding (which may be a
+        // stale/attacker-declared charset) is not trustworthy, and
+        // `markdown(fromHTML:)` passes `.characterEncoding` explicitly so
+        // the importer can't reinterpret these bytes under a different
+        // charset (e.g. a leftover `meta charset` in the sanitized markup).
+        guard let reencoded = sanitized.data(using: .utf8) else { return data }
         return reencoded
+    }
+
+    /// Detects the real encoding of captured HTML bytes: BOM first (for
+    /// UTF-16, which pasteboard HTML commonly uses — Windows/Office-origin
+    /// rich clipboard content in particular), then `NSString`'s built-in
+    /// detector, then the historical UTF-8/Latin-1 ladder as a last resort.
+    /// Decoding by the wrong encoding is how a sanitizer bypass happens: the
+    /// regexes above never match NUL-interleaved garbage, so the original,
+    /// unstripped markup would round-trip straight through.
+    static func decodedHTML(_ data: Data) -> (text: String, encoding: String.Encoding)? {
+        if data.count >= 2 {
+            let b0 = data[data.startIndex]
+            let b1 = data[data.index(after: data.startIndex)]
+            if b0 == 0xFF, b1 == 0xFE, let s = String(data: data, encoding: .utf16LittleEndian) {
+                return (s, .utf16LittleEndian)
+            }
+            if b0 == 0xFE, b1 == 0xFF, let s = String(data: data, encoding: .utf16BigEndian) {
+                return (s, .utf16BigEndian)
+            }
+        }
+        var converted: NSString?
+        let raw = NSString.stringEncoding(for: data, encodingOptions: nil, convertedString: &converted, usedLossyConversion: nil)
+        if raw != 0, let converted {
+            return (converted as String, String.Encoding(rawValue: raw))
+        }
+        if let utf8 = String(data: data, encoding: .utf8) { return (utf8, .utf8) }
+        if let latin1 = String(data: data, encoding: .isoLatin1) { return (latin1, .isoLatin1) }
+        return nil
     }
 
     static func markdown(fromRTF data: Data) -> String? {

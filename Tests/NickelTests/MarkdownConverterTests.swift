@@ -105,6 +105,50 @@ final class MarkdownConverterTests: XCTestCase {
         XCTAssertTrue(result!.contains("[link](https://example.com/)"), "expected markdown link to survive sanitizing in: \(result!)")
     }
 
+    func testSanitizerStripsImgFromUTF16Payload() {
+        let source = """
+        <html><head><meta charset="utf-16"></head><body>\
+        <p>hello <img src="https://example.invalid/pixel.gif"> world</p>\
+        </body></html>
+        """
+        var data = Data([0xFF, 0xFE])
+        data.append(source.data(using: .utf16LittleEndian)!)
+
+        let sanitizedData = MarkdownConverter.strippingRemoteResources(data)
+        let sanitized = String(data: sanitizedData, encoding: .utf8)
+        XCTAssertNotNil(sanitized)
+        XCTAssertTrue(sanitized!.contains("hello"), "expected leading text preserved in: \(sanitized!)")
+        XCTAssertTrue(sanitized!.contains("world"), "expected trailing text preserved in: \(sanitized!)")
+        XCTAssertFalse(sanitized!.lowercased().contains("<img"), "expected <img tag stripped from: \(sanitized!)")
+        XCTAssertFalse(sanitized!.contains("example.invalid"), "expected tracker URL stripped from: \(sanitized!)")
+    }
+
+    func testSanitizerStripsInlineSVGImage() {
+        let data = html("<p>hello</p><svg><image href=\"https://example.invalid/x.png\"/></svg>")
+        let sanitizedData = MarkdownConverter.strippingRemoteResources(data)
+        let sanitized = String(data: sanitizedData, encoding: .utf8)
+        XCTAssertNotNil(sanitized)
+        XCTAssertFalse(sanitized!.contains("example.invalid"), "expected inline SVG resource stripped from: \(sanitized!)")
+    }
+
+    func testSanitizerStripsBackgroundAttribute() {
+        let data = html("<table background=\"https://example.invalid/bg.png\"><tr><td>cell</td></tr></table>")
+        let sanitizedData = MarkdownConverter.strippingRemoteResources(data)
+        let sanitized = String(data: sanitizedData, encoding: .utf8)
+        XCTAssertNotNil(sanitized)
+        XCTAssertFalse(sanitized!.contains("example.invalid"), "expected background attribute stripped from: \(sanitized!)")
+    }
+
+    func testUTF16HTMLStillConverts() {
+        let source = "<html><head><meta charset=\"utf-16\"></head><body><b>bold</b></body></html>"
+        var data = Data([0xFF, 0xFE])
+        data.append(source.data(using: .utf16LittleEndian)!)
+
+        let result = MarkdownConverter.markdown(fromHTML: data)
+        XCTAssertNotNil(result)
+        XCTAssertTrue(result!.contains("**bold**"), "expected **bold** in: \(result!)")
+    }
+
     // MARK: - RTF path
 
     private func rtfData(from attributed: NSAttributedString) -> Data {
