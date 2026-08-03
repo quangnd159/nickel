@@ -164,6 +164,29 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     // MARK: - NSWindowDelegate
 
+    /// A field editor that refuses every drag. `NSTextView` natively claims
+    /// drags of files it can read as text (a `.txt` from Finder), which
+    /// swallowed those drags before the composer card's SwiftUI drop region
+    /// could stage the file as an attachment — while PDFs/images, which the
+    /// text system refuses, fell through and attached fine. Refusing all
+    /// drags at the field editor makes every file type take the same
+    /// fall-through path to the drop region. (Drops of plain *text content*
+    /// still work: the drop region itself inserts text into the composer.)
+    private final class DragRejectingFieldEditor: NSTextView {
+        override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [] }
+    }
+
+    private lazy var dragRejectingFieldEditor: DragRejectingFieldEditor = {
+        let editor = DragRejectingFieldEditor()
+        editor.isFieldEditor = true
+        return editor
+    }()
+
+    func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
+        guard client is GrowingTextField else { return nil }
+        return dragRejectingFieldEditor
+    }
+
     func windowDidMove(_ notification: Notification) {
         saveFrame()
     }
