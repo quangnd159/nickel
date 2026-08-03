@@ -28,10 +28,18 @@ enum PasteboardWriter {
     /// is the reason this exists: it stages the attachments-only layout on
     /// copy, then later swaps in the text-only layout for a synthetic paste,
     /// both from whatever batch was actually copied.
+    /// Holds attachment *URLs*, not built `NSPasteboardItem`s: an
+    /// `NSPasteboardItem` can be attached to a pasteboard only once, and a
+    /// layout is written repeatedly (full on copy, attachments-only on arm
+    /// and every re-stage), so each write must build fresh items.
     struct Layout {
         let text: String
         let rich: NSAttributedString
-        let attachmentItems: [NSPasteboardItem]
+        let attachmentURLs: [URL]
+
+        var attachmentItems: [NSPasteboardItem] {
+            attachmentURLs.map { PasteboardWriter.item(forAttachmentAt: $0) }
+        }
     }
 
     /// Joins the notes' text with a blank line between each, in the order
@@ -138,10 +146,10 @@ enum PasteboardWriter {
     /// chat apps the image data, matching how a Finder/screenshot paste
     /// looks) without ever seeing the picture as two separate attachments.
     private static func makeLayout(text: String, rich: NSAttributedString, notes: [Note], store: NoteStore) -> Layout {
-        let attachmentItems = notes.flatMap { note in
-            note.attachments.map { item(forAttachmentAt: store.url(for: $0, in: note)) }
+        let attachmentURLs = notes.flatMap { note in
+            note.attachments.map { store.url(for: $0, in: note) }
         }
-        return Layout(text: text, rich: rich, attachmentItems: attachmentItems)
+        return Layout(text: text, rich: rich, attachmentURLs: attachmentURLs)
     }
 
     /// Writes the full layout: the rich item first, then one
@@ -159,7 +167,7 @@ enum PasteboardWriter {
     /// attachments (a real ⌘V reading this gets images/files but no text).
     static func writeAttachmentsOnly(_ layout: Layout, pasteboard: NSPasteboard = .general) {
         pasteboard.clearContents()
-        guard !layout.attachmentItems.isEmpty else { return }
+        guard !layout.attachmentURLs.isEmpty else { return }
         pasteboard.writeObjects(layout.attachmentItems)
     }
 

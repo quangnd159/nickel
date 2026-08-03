@@ -248,4 +248,37 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(items.count, 1)
         XCTAssertEqual(items[0].string(forType: .string), "- first\n- second")
     }
+
+    // MARK: - repeated writes of one layout
+
+    /// Regression test: an `NSPasteboardItem` can be attached to a pasteboard
+    /// only once, and the sequential-paste flow writes one layout repeatedly
+    /// (full on copy, attachments-only on arm and every re-stage). Caching
+    /// built items in `Layout` left the pasteboard empty on the second write.
+    func testLayoutSurvivesRepeatedWrites() throws {
+        let source = tempDirectory.appendingPathComponent("shot.png")
+        try pngData().write(to: source)
+        _ = store.add(
+            text: "a screenshot",
+            attachments: [(sourceURL: source, filename: "shot.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+
+        let layout = try XCTUnwrap(PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard))
+
+        PasteboardWriter.writeAttachmentsOnly(layout, pasteboard: pasteboard)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+        XCTAssertNotNil(pasteboard.pasteboardItems?.first?.string(forType: .fileURL))
+
+        PasteboardWriter.writeTextOnly(layout, pasteboard: pasteboard)
+        XCTAssertEqual(pasteboard.pasteboardItems?.first?.string(forType: .string), "a screenshot\nshot.png")
+
+        PasteboardWriter.writeAttachmentsOnly(layout, pasteboard: pasteboard)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+        XCTAssertNotNil(pasteboard.pasteboardItems?.first?.string(forType: .fileURL))
+
+        PasteboardWriter.write(layout, pasteboard: pasteboard)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 2)
+        XCTAssertNotNil(pasteboard.pasteboardItems?.first?.data(forType: .rtfd))
+    }
 }
