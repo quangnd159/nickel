@@ -34,6 +34,13 @@ enum PasteboardWriter {
     /// and every re-stage), so each write must build fresh items.
     struct Layout {
         let text: String
+        /// The text for the sequential second paste, where the attachments
+        /// have already arrived as real attachments: note text only, no
+        /// filename lines (which would read as noise next to the actual
+        /// image), and attachment-only notes contribute nothing. `text`
+        /// keeps the filenames because it's the fallback for consumers that
+        /// never see the attachments at all.
+        let textWithoutFilenames: String
         let rich: NSAttributedString
         let attachmentURLs: [URL]
 
@@ -52,8 +59,9 @@ enum PasteboardWriter {
     static func copy(notes: [Note], store: NoteStore, pasteboard: NSPasteboard = .general) -> Layout? {
         guard !notes.isEmpty else { return nil }
         let text = notes.map { line(for: $0) }.joined(separator: "\n\n")
+        let textWithoutFilenames = notes.map(\.text).filter { !$0.isEmpty }.joined(separator: "\n\n")
         let rich = joined(notes.map { attributedLine(for: $0, store: store) }, separator: "\n\n")
-        let layout = makeLayout(text: text, rich: rich, notes: notes, store: store)
+        let layout = makeLayout(text: text, textWithoutFilenames: textWithoutFilenames, rich: rich, notes: notes, store: store)
         write(layout, pasteboard: pasteboard)
         return layout
     }
@@ -68,13 +76,16 @@ enum PasteboardWriter {
             "- " + line(for: note).replacingOccurrences(of: "\n", with: "\n  ")
         }
         let text = lines.joined(separator: "\n")
+        let textWithoutFilenames = notes.map(\.text).filter { !$0.isEmpty }
+            .map { "- " + $0.replacingOccurrences(of: "\n", with: "\n  ") }
+            .joined(separator: "\n")
         let richLines = notes.map { note -> NSAttributedString in
             let bulleted = NSMutableAttributedString(string: "- ")
             bulleted.append(attributedLine(for: note, store: store, newlineIndent: "  "))
             return bulleted
         }
         let rich = joined(richLines, separator: "\n")
-        let layout = makeLayout(text: text, rich: rich, notes: notes, store: store)
+        let layout = makeLayout(text: text, textWithoutFilenames: textWithoutFilenames, rich: rich, notes: notes, store: store)
         write(layout, pasteboard: pasteboard)
         return layout
     }
@@ -145,11 +156,11 @@ enum PasteboardWriter {
     /// whichever representation it understands (file-aware apps the URL,
     /// chat apps the image data, matching how a Finder/screenshot paste
     /// looks) without ever seeing the picture as two separate attachments.
-    private static func makeLayout(text: String, rich: NSAttributedString, notes: [Note], store: NoteStore) -> Layout {
+    private static func makeLayout(text: String, textWithoutFilenames: String, rich: NSAttributedString, notes: [Note], store: NoteStore) -> Layout {
         let attachmentURLs = notes.flatMap { note in
             note.attachments.map { store.url(for: $0, in: note) }
         }
-        return Layout(text: text, rich: rich, attachmentURLs: attachmentURLs)
+        return Layout(text: text, textWithoutFilenames: textWithoutFilenames, rich: rich, attachmentURLs: attachmentURLs)
     }
 
     /// Writes the full layout: the rich item first, then one
@@ -178,7 +189,7 @@ enum PasteboardWriter {
     static func writeTextOnly(_ layout: Layout, pasteboard: NSPasteboard = .general) {
         pasteboard.clearContents()
         let item = NSPasteboardItem()
-        item.setString(layout.text, forType: .string)
+        item.setString(layout.textWithoutFilenames, forType: .string)
         pasteboard.writeObjects([item])
     }
 

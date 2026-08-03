@@ -271,7 +271,7 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertNotNil(pasteboard.pasteboardItems?.first?.string(forType: .fileURL))
 
         PasteboardWriter.writeTextOnly(layout, pasteboard: pasteboard)
-        XCTAssertEqual(pasteboard.pasteboardItems?.first?.string(forType: .string), "a screenshot\nshot.png")
+        XCTAssertEqual(pasteboard.pasteboardItems?.first?.string(forType: .string), "a screenshot")
 
         PasteboardWriter.writeAttachmentsOnly(layout, pasteboard: pasteboard)
         XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
@@ -280,5 +280,31 @@ final class PasteboardWriterTests: XCTestCase {
         PasteboardWriter.write(layout, pasteboard: pasteboard)
         XCTAssertEqual(pasteboard.pasteboardItems?.count, 2)
         XCTAssertNotNil(pasteboard.pasteboardItems?.first?.data(forType: .rtfd))
+    }
+
+    // MARK: - text-only payload strips filenames
+
+    /// The sequential second paste delivers text alongside already-attached
+    /// images, so it must carry note text only: no filename lines, and
+    /// attachment-only notes contribute nothing (no empty bullets). The full
+    /// layout's `.string` fallback keeps the filenames.
+    func testTextOnlyPayloadOmitsFilenamesAndAttachmentOnlyNotes() throws {
+        let source = tempDirectory.appendingPathComponent("shot.png")
+        try pngData().write(to: source)
+        store.add(text: "first", sourceApp: nil)
+        _ = store.add(
+            text: "",
+            attachments: [(sourceURL: source, filename: "shot.png", contentType: "public.png")],
+            sourceApp: nil
+        )
+        store.add(text: "second", sourceApp: nil)
+
+        let layout = try XCTUnwrap(PasteboardWriter.copyAsList(notes: store.notes, store: store, pasteboard: pasteboard))
+        XCTAssertEqual(layout.text, "- first\n- shot.png\n- second")
+        XCTAssertEqual(layout.textWithoutFilenames, "- first\n- second")
+
+        let plainLayout = try XCTUnwrap(PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard))
+        XCTAssertEqual(plainLayout.text, "first\n\nshot.png\n\nsecond")
+        XCTAssertEqual(plainLayout.textWithoutFilenames, "first\n\nsecond")
     }
 }
