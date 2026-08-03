@@ -412,6 +412,60 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertTrue(didFindNote, "expected the debounced save to eventually write the note to disk")
     }
 
+    // MARK: - nextSaveDelay
+
+    func testNextSaveDelayWithNoPendingSaveUsesDebounce() {
+        let delay = NoteStore.nextSaveDelay(firstPendingAt: nil, now: Date(), debounce: 0.5, maxDeferral: 3.0)
+        XCTAssertEqual(delay, 0.5, accuracy: 0.001)
+    }
+
+    func testNextSaveDelayBelowCeilingUsesFullDebounce() {
+        let now = Date()
+        let firstPendingAt = now.addingTimeInterval(-0.1)
+        let delay = NoteStore.nextSaveDelay(firstPendingAt: firstPendingAt, now: now, debounce: 0.5, maxDeferral: 3.0)
+        XCTAssertEqual(delay, 0.5, accuracy: 0.001)
+    }
+
+    func testNextSaveDelayNearCeilingIsShortened() {
+        let now = Date()
+        let firstPendingAt = now.addingTimeInterval(-2.8)
+        let delay = NoteStore.nextSaveDelay(firstPendingAt: firstPendingAt, now: now, debounce: 0.5, maxDeferral: 3.0)
+        XCTAssertEqual(delay, 0.2, accuracy: 0.001)
+    }
+
+    func testNextSaveDelayPastCeilingIsNeverNegative() {
+        let now = Date()
+        let firstPendingAt = now.addingTimeInterval(-3.5)
+        let delay = NoteStore.nextSaveDelay(firstPendingAt: firstPendingAt, now: now, debounce: 0.5, maxDeferral: 3.0)
+        XCTAssertEqual(delay, 0, accuracy: 0.001)
+    }
+
+    // MARK: - bounded deferral integration
+
+    func testContinuousMutationsStillHitDiskWithinCeiling() {
+        store.add(text: "burst", sourceApp: nil)
+        let noteID = store.notes.first!.id
+        let start = Date()
+
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [store] _ in
+            store?.update(id: noteID, text: "burst \(Date().timeIntervalSince1970)")
+        }
+        defer { timer.invalidate() }
+
+        let deadline = start.addingTimeInterval(4.0)
+        var didFindWrite = false
+        while Date() < deadline {
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                didFindWrite = true
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+
+        XCTAssertTrue(didFindWrite, "expected a write to land within the deferral ceiling despite continuous mutations")
+        XCTAssertLessThan(Date().timeIntervalSince(start), 4.0, "write should have landed before the 4.0s bound")
+    }
+
     func testFailedWriteSetsSaveError() throws {
         let readonlyDirectory = tempDirectory.appendingPathComponent("readonly", isDirectory: true)
         try FileManager.default.createDirectory(at: readonlyDirectory, withIntermediateDirectories: true)

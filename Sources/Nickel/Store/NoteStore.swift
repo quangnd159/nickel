@@ -23,6 +23,10 @@ final class NoteStore: ObservableObject {
     let fileURL: URL
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounceInterval: TimeInterval = 0.5
+    private let maxSaveDeferral: TimeInterval = 3.0
+    /// When the first not-yet-written mutation of the current coalescing burst
+    /// happened; nil when no save is pending.
+    private var firstPendingSaveAt: Date?
     /// Serial queue that performs the actual disk write. Snapshots are taken
     /// on the main thread in mutation order and enqueued here in that same
     /// order, so writes can never reorder relative to each other.
@@ -492,16 +496,29 @@ final class NoteStore: ObservableObject {
 
     private func scheduleSave() {
         saveWorkItem?.cancel()
+        let now = Date()
+        if firstPendingSaveAt == nil { firstPendingSaveAt = now }
+        let delay = Self.nextSaveDelay(firstPendingAt: firstPendingSaveAt, now: now, debounce: saveDebounceInterval, maxDeferral: maxSaveDeferral)
         let workItem = DispatchWorkItem { [weak self] in
             guard let self else { return }
             let envelope = StoredEnvelope(version: 2, sections: self.sections, activeSection: self.activeSection, notes: self.notes)
             self.saveWorkItem = nil
+            self.firstPendingSaveAt = nil
             self.saveQueue.async {
                 self.write(envelope)
             }
         }
         saveWorkItem = workItem
-        DispatchQueue.main.asyncAfter(deadline: .now() + saveDebounceInterval, execute: workItem)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    /// The delay the next debounced save should use: the normal debounce
+    /// interval, shortened so the write lands no later than `maxDeferral`
+    /// after `firstPendingAt`. Never negative.
+    static func nextSaveDelay(firstPendingAt: Date?, now: Date, debounce: TimeInterval, maxDeferral: TimeInterval) -> TimeInterval {
+        guard let firstPendingAt else { return debounce }
+        let ceilingRemaining = maxDeferral - now.timeIntervalSince(firstPendingAt)
+        return max(0, min(debounce, ceilingRemaining))
     }
 
     /// Writes the current notes to disk immediately, bypassing the debounce.
@@ -512,6 +529,7 @@ final class NoteStore: ObservableObject {
     func saveNow() {
         saveWorkItem?.cancel()
         saveWorkItem = nil
+        firstPendingSaveAt = nil
 
         let envelope = StoredEnvelope(version: 2, sections: sections, activeSection: activeSection, notes: notes)
         saveQueue.sync {
