@@ -616,7 +616,14 @@ struct PanelView: View {
                 dropToAttachPill
             }
         }
-        .onDrop(of: composerDropTypes, isTargeted: $isComposerDropTargeted, perform: handleComposerDrop)
+        .background(
+            ComposerDropTarget(
+                isTargeted: $isComposerDropTargeted,
+                onFileURLs: stageDroppedFiles,
+                onText: insertDroppedText,
+                onImageData: stageDroppedImageData
+            )
+        )
         .overlay(alignment: .top) {
             if let attachmentToast {
                 attachmentToastView(attachmentToast)
@@ -624,14 +631,6 @@ struct PanelView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
-    }
-
-    /// Types accepted by the composer's drop target: real files, raw
-    /// image payloads with no backing file (screenshots dragged straight off
-    /// a capture tool), and plain text (which is inserted into the composer
-    /// text, not staged as an attachment — see `handleComposerDrop`).
-    private var composerDropTypes: [UTType] {
-        [.fileURL, .image, .png, .tiff, .utf8PlainText, .text]
     }
 
     /// Floated over the composer's (dimmed, still-visible) contents while a
@@ -775,72 +774,33 @@ struct PanelView: View {
         }
     }
 
-    /// Handles a drag onto the composer card. Plain text is inserted into
-    /// the composer's text (native text-field drop behavior), leaving Return
-    /// as the single "commit" gesture; files and images are staged as
-    /// pending attachments exactly like the paperclip picker and ⌘V paste,
-    /// leaving `composerText` untouched until the user commits with Return.
-    private func handleComposerDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard !providers.isEmpty else { return false }
+    // MARK: - Composer drops (see ComposerDropTarget for why AppKit-level)
 
-        // File drags are detected via AppKit's drag pasteboard, not the
-        // SwiftUI providers: for a text-like file (.txt, .json) SwiftUI
-        // surfaces only the file's *content* type ("public.plain-text", no
-        // file URL), so provider inspection can't tell a dragged text file
-        // from dragged text. The drag pasteboard always carries the real
-        // file URLs, for every file type.
-        // `filePathURL` resolves the file-reference form drags carry
-        // (`file:///.file/id=…`), which has no usable last path component
-        // for the chip's filename/icon.
-        let draggedFileURLs = ((NSPasteboard(name: .drag)
-            .readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? [])
-            .map { ($0 as NSURL).filePathURL ?? $0 }
-        if !draggedFileURLs.isEmpty {
-            for url in draggedFileURLs {
-                pendingAttachments.append(StagedAttachment(sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
-            }
-            showAttachmentToast(count: draggedFileURLs.count)
-            return true
+    /// Dropped files (any type) become pending attachments, exactly like the
+    /// paperclip picker and ⌘V paste, leaving `composerText` untouched until
+    /// the user commits with Return.
+    private func stageDroppedFiles(_ urls: [URL]) {
+        for url in urls {
+            pendingAttachments.append(StagedAttachment(sourceURL: url, filename: url.lastPathComponent, contentType: contentType(of: url)))
         }
+        showAttachmentToast(count: urls.count)
+    }
 
-        // Not a file drag, so text content (a dragged selection) inserts
-        // into the composer text.
-        if providers.count == 1, let provider = providers.first,
-           provider.hasItemConformingToTypeIdentifier(UTType.text.identifier) {
-            provider.loadObject(ofClass: NSString.self) { object, _ in
-                guard let text = object as? String, !text.isEmpty else { return }
-                DispatchQueue.main.async {
-                    composerText = composerText.isEmpty ? text : composerText + "\n" + text
-                    NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
-                }
-            }
-            return true
-        }
+    /// Dropped text content (a dragged selection, not a file) is inserted
+    /// into the composer's text — native text-field drop behavior — leaving
+    /// Return as the single "commit" gesture.
+    private func insertDroppedText(_ text: String) {
+        composerText = composerText.isEmpty ? text : composerText + "\n" + text
+        NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+    }
 
-        let group = DispatchGroup()
-        var collected: [(sourceURL: URL, filename: String, contentType: String)] = []
-        let collectedLock = NSLock()
-
-        for provider in providers {
-            group.enter()
-            loadDroppedAttachment(from: provider) { input in
-                if let input {
-                    collectedLock.lock()
-                    collected.append(input)
-                    collectedLock.unlock()
-                }
-                group.leave()
-            }
-        }
-
-        group.notify(queue: .main) {
-            guard !collected.isEmpty else { return }
-            for input in collected {
-                pendingAttachments.append(StagedAttachment(sourceURL: input.sourceURL, filename: input.filename, contentType: input.contentType))
-            }
-            showAttachmentToast(count: collected.count)
-        }
-        return true
+    /// A raw dropped image with no backing file (e.g. a screenshot dragged
+    /// straight off a capture tool) is written to a temp "Image.png" file so
+    /// it can be copied like any other source file once the note commits.
+    private func stageDroppedImageData(_ data: Data) {
+        guard let image = NSImage(data: data), let tempURL = Self.writeTemporaryPNG(image) else { return }
+        pendingAttachments.append(StagedAttachment(sourceURL: tempURL, filename: "Image.png", contentType: UTType.png.identifier))
+        showAttachmentToast(count: 1)
     }
 
     /// Shows (or restarts) the "Attached N file(s)" toast above the
@@ -880,24 +840,6 @@ struct PanelView: View {
     /// Resolves one dropped item to a copyable source file: a real file URL
     /// is used as-is; a raw image payload with no backing file is written to
     /// a temp "Image.png" first.
-    private func loadDroppedAttachment(
-        from provider: NSItemProvider,
-        completion: @escaping ((sourceURL: URL, filename: String, contentType: String)?) -> Void
-    ) {
-        let imageTypes: [UTType] = [.png, .tiff, .image]
-        guard let imageType = imageTypes.first(where: { provider.hasItemConformingToTypeIdentifier($0.identifier) }) else {
-            completion(nil)
-            return
-        }
-        provider.loadDataRepresentation(forTypeIdentifier: imageType.identifier) { data, _ in
-            guard let data, let image = NSImage(data: data), let tempURL = Self.writeTemporaryPNG(image) else {
-                completion(nil)
-                return
-            }
-            completion((sourceURL: tempURL, filename: "Image.png", contentType: UTType.png.identifier))
-        }
-    }
-
     /// Best-effort UTType identifier for a file on disk, falling back to
     /// generic `public.data` if the filesystem can't say (e.g. the file
     /// vanished between picking/dropping it and reading its metadata).
