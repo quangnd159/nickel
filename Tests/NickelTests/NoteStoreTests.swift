@@ -412,6 +412,54 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertTrue(didFindNote, "expected the debounced save to eventually write the note to disk")
     }
 
+    func testFailedWriteSetsSaveError() throws {
+        let readonlyDirectory = tempDirectory.appendingPathComponent("readonly", isDirectory: true)
+        try FileManager.default.createDirectory(at: readonlyDirectory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: readonlyDirectory.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: readonlyDirectory.path)
+        }
+
+        let failingFileURL = readonlyDirectory.appendingPathComponent("sub/notes.json")
+        let failingStore = NoteStore(fileURL: failingFileURL)
+        failingStore.add(text: "should fail to save", sourceApp: nil)
+        failingStore.saveNow()
+
+        let exp = expectation(description: "main queue drained")
+        DispatchQueue.main.async { exp.fulfill() }
+        wait(for: [exp], timeout: 2)
+
+        XCTAssertNotNil(failingStore.saveError)
+    }
+
+    func testSuccessfulWriteClearsSaveError() throws {
+        let readonlyDirectory = tempDirectory.appendingPathComponent("readonly2", isDirectory: true)
+        try FileManager.default.createDirectory(at: readonlyDirectory, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: readonlyDirectory.path)
+
+        let failingFileURL = readonlyDirectory.appendingPathComponent("sub/notes.json")
+        let failingStore = NoteStore(fileURL: failingFileURL)
+        failingStore.add(text: "should fail then succeed", sourceApp: nil)
+        failingStore.saveNow()
+
+        let exp1 = expectation(description: "main queue drained after failure")
+        DispatchQueue.main.async { exp1.fulfill() }
+        wait(for: [exp1], timeout: 2)
+        XCTAssertNotNil(failingStore.saveError, "precondition: save should have failed")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: readonlyDirectory.path)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: readonlyDirectory.path)
+        }
+        failingStore.saveNow()
+
+        let exp2 = expectation(description: "main queue drained after success")
+        DispatchQueue.main.async { exp2.fulfill() }
+        wait(for: [exp2], timeout: 2)
+
+        XCTAssertNil(failingStore.saveError)
+    }
+
     func testDecodingNoteWithoutAttachmentsKeyIsBackwardCompatible() throws {
         let json = """
         {

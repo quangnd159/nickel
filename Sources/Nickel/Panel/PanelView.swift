@@ -107,6 +107,11 @@ struct PanelView: View {
                     noteList
                 }
 
+                if let saveError = store.saveError {
+                    saveErrorBanner(saveError)
+                        .padding(.top, 10)
+                }
+
                 composer
                     .padding(.top, 10)
             }
@@ -647,6 +652,26 @@ struct PanelView: View {
         .background(
             Capsule().fill(.regularMaterial)
                 .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+        )
+    }
+
+    /// Persistent warning shown while the most recent notes.json write has
+    /// failed (`store.saveError`). Unlike `attachmentToastView`, this isn't
+    /// auto-dismissing `@State`: it's driven by store state and clears
+    /// itself only when a save succeeds.
+    private func saveErrorBanner(_ message: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+            Text("Couldn't save notes: \(message)")
+        }
+        .font(.callout)
+        .foregroundStyle(.primary)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.orange.opacity(0.2))
         )
     }
 

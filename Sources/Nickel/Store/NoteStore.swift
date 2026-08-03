@@ -16,6 +16,10 @@ final class NoteStore: ObservableObject {
     /// focused view when non-nil. `nil` means "Show All".
     @Published private(set) var activeSection: String?
 
+    /// Non-nil while the most recent notes.json write failed; cleared by the
+    /// next successful write. Set on the main thread (write runs on saveQueue).
+    @Published private(set) var saveError: String?
+
     let fileURL: URL
     private var saveWorkItem: DispatchWorkItem?
     private let saveDebounceInterval: TimeInterval = 0.5
@@ -531,8 +535,13 @@ final class NoteStore: ObservableObject {
             // chmod failure must never fail the save, so these are best-effort.
             try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
             try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
+
+            if saveError != nil {
+                DispatchQueue.main.async { self.saveError = nil }
+            }
         } catch {
             NSLog("NoteStore: failed to save notes: \(error)")
+            DispatchQueue.main.async { self.saveError = error.localizedDescription }
         }
     }
 
