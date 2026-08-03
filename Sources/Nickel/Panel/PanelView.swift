@@ -790,10 +790,23 @@ struct PanelView: View {
     /// (e.g. dropping more files right after a paste) restarts the ~1.8s
     /// countdown instead of an earlier dismiss cutting the new toast short.
     private func showAttachmentToast(count: Int) {
+        showAttachmentToast(message: count == 1 ? "Attached 1 file" : "Attached \(count) files")
+    }
+
+    /// Shown when `commitComposer` couldn't copy one or more staged
+    /// attachments into the note's attachments directory; those items stay
+    /// staged (see `commitComposer`) rather than being silently discarded.
+    private func showAttachmentFailureToast(count: Int) {
+        showAttachmentToast(message: count == 1 ? "Couldn't attach 1 file" : "Couldn't attach \(count) files")
+    }
+
+    /// Shared toast presentation, used by both the "Attached" success
+    /// message and the "Couldn't attach" failure message.
+    private func showAttachmentToast(message: String) {
         attachmentToastDismissTask?.cancel()
 
         withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            attachmentToast = count == 1 ? "Attached 1 file" : "Attached \(count) files"
+            attachmentToast = message
         }
 
         let dismiss = DispatchWorkItem {
@@ -916,11 +929,18 @@ struct PanelView: View {
             store.add(text: text, sourceApp: nil)
         } else {
             let attachments = pendingAttachments.map { (sourceURL: $0.sourceURL, filename: $0.filename, contentType: $0.contentType) }
-            store.add(text: text, attachments: attachments, sourceApp: nil)
-            for staged in pendingAttachments {
+            let failedIndices = store.add(text: text, attachments: attachments, sourceApp: nil)
+            let failed = Set(failedIndices)
+            for (index, staged) in pendingAttachments.enumerated() where !failed.contains(index) {
                 Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
             }
-            pendingAttachments = []
+            // Items that failed to copy stay staged — their temp files
+            // (e.g. a pasted screenshot with no other copy) survive, and the
+            // user can retry (Return again) or remove the chip.
+            pendingAttachments = failedIndices.compactMap { pendingAttachments.indices.contains($0) ? pendingAttachments[$0] : nil }
+            if !failedIndices.isEmpty {
+                showAttachmentFailureToast(count: failedIndices.count)
+            }
         }
         composerText = ""
     }
