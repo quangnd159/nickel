@@ -133,9 +133,13 @@ final class PasteboardWriterTests: XCTestCase {
         XCTAssertEqual(items.count, 2)
 
         // No image anywhere in the batch, so the rich item degrades to a
-        // plain string, matching pre-RTFD behavior.
+        // plain string, matching pre-RTFD behavior. (The first item also
+        // carries the pasteboard-global legacy filenames flavor, so no
+        // exact-equality check on its types.)
         let richItem = items[0]
-        XCTAssertEqual(richItem.types, [.string])
+        XCTAssertTrue(richItem.types.contains(.string))
+        XCTAssertNil(richItem.data(forType: .rtfd))
+        XCTAssertNil(richItem.data(forType: .rtf))
         XCTAssertEqual(richItem.string(forType: .string), "notes.txt")
 
         let attachmentItem = items[1]
@@ -217,8 +221,11 @@ final class PasteboardWriterTests: XCTestCase {
 
         // Unreadable file means no NSTextAttachment gets embedded, so the
         // rich item degrades to plain string, same as the no-image path.
+        // (Types checked by content, not exact equality — the first item
+        // also carries the pasteboard-global legacy filenames flavor.)
         let richItem = items[0]
-        XCTAssertEqual(richItem.types, [.string])
+        XCTAssertTrue(richItem.types.contains(.string))
+        XCTAssertNil(richItem.data(forType: .rtfd))
 
         let attachmentItem = items[1]
         XCTAssertEqual(attachmentItem.types, [.fileURL])
@@ -280,6 +287,43 @@ final class PasteboardWriterTests: XCTestCase {
         PasteboardWriter.write(layout, pasteboard: pasteboard)
         XCTAssertEqual(pasteboard.pasteboardItems?.count, 2)
         XCTAssertNotNil(pasteboard.pasteboardItems?.first?.data(forType: .rtfd))
+    }
+
+    // MARK: - legacy filenames flavor
+
+    /// Any-file-type attach in Chromium-family composers rides on the legacy
+    /// Finder-style path-list flavor; bare `public.file-url` items paste as
+    /// nothing there (verified empirically). Text-only copies must not carry
+    /// it.
+    func testAttachmentLayoutsCarryLegacyFilenamesFlavor() throws {
+        let source = tempDirectory.appendingPathComponent("doc.pdf")
+        try Data("pdf".utf8).write(to: source)
+        _ = store.add(
+            text: "a document",
+            attachments: [(sourceURL: source, filename: "doc.pdf", contentType: "com.adobe.pdf")],
+            sourceApp: nil
+        )
+
+        let legacyType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+        let layout = try XCTUnwrap(PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard))
+
+        let fullPaths = try XCTUnwrap(pasteboard.propertyList(forType: legacyType) as? [String])
+        XCTAssertEqual(fullPaths, layout.attachmentURLs.map(\.path))
+
+        PasteboardWriter.writeAttachmentsOnly(layout, pasteboard: pasteboard)
+        let stagedPaths = try XCTUnwrap(pasteboard.propertyList(forType: legacyType) as? [String])
+        XCTAssertEqual(stagedPaths, layout.attachmentURLs.map(\.path))
+
+        PasteboardWriter.writeTextOnly(layout, pasteboard: pasteboard)
+        XCTAssertNil(pasteboard.propertyList(forType: legacyType))
+    }
+
+    func testTextOnlyCopyDoesNotCarryLegacyFilenamesFlavor() {
+        store.add(text: "hello", sourceApp: nil)
+
+        PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard)
+
+        XCTAssertNil(pasteboard.propertyList(forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")))
     }
 
     // MARK: - text-only payload strips filenames

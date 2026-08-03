@@ -171,6 +171,7 @@ enum PasteboardWriter {
     static func write(_ layout: Layout, pasteboard: NSPasteboard = .general) {
         pasteboard.clearContents()
         pasteboard.writeObjects([richItem(for: layout.rich, fallbackText: layout.text)] + layout.attachmentItems)
+        addLegacyFilenames(for: layout, to: pasteboard)
     }
 
     /// Writes just the per-attachment items, no rich/text item at all. Used
@@ -180,6 +181,7 @@ enum PasteboardWriter {
         pasteboard.clearContents()
         guard !layout.attachmentURLs.isEmpty else { return }
         pasteboard.writeObjects(layout.attachmentItems)
+        addLegacyFilenames(for: layout, to: pasteboard)
     }
 
     /// Writes a single plain-string item carrying the layout's combined
@@ -191,6 +193,20 @@ enum PasteboardWriter {
         let item = NSPasteboardItem()
         item.setString(layout.textWithoutFilenames, forType: .string)
         pasteboard.writeObjects([item])
+    }
+
+    /// The legacy Finder-style "list of file paths" flavor. Chromium-family
+    /// paste handlers (ChatGPT/Codex composers, Electron apps) detect "files
+    /// on the clipboard" through this flavor, not through per-item
+    /// `public.file-url` — verified empirically: a bare file-URL item pastes
+    /// as nothing there, while this flavor attaches any file type, and image
+    /// attachments still attach exactly once alongside it.
+    private static let legacyFilenamesType = NSPasteboard.PasteboardType("NSFilenamesPboardType")
+
+    private static func addLegacyFilenames(for layout: Layout, to pasteboard: NSPasteboard) {
+        guard !layout.attachmentURLs.isEmpty else { return }
+        pasteboard.addTypes([legacyFilenamesType], owner: nil)
+        pasteboard.setPropertyList(layout.attachmentURLs.map(\.path), forType: legacyFilenamesType)
     }
 
     /// Builds the first pasteboard item: RTFD + RTF + plain string when the
