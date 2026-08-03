@@ -196,6 +196,30 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(store.sections, ["Work"])
     }
 
+    func testRenameSectionCaseOnlyUpdatesCasing() {
+        store.createSection(named: "work")
+        store.add(text: "a", sourceApp: nil) // lands in work
+        let id = store.notes[0].id
+
+        store.renameSection(from: "work", to: "Work")
+
+        XCTAssertEqual(store.sections, ["Work"])
+        XCTAssertEqual(store.notes.first(where: { $0.id == id })?.listName, "Work")
+        XCTAssertEqual(store.activeSection, "Work")
+    }
+
+    func testRenameSectionCaseOnlyWithWhitespace() {
+        store.createSection(named: "work")
+        store.add(text: "a", sourceApp: nil) // lands in work
+        let id = store.notes[0].id
+
+        store.renameSection(from: "work", to: "  Work  ")
+
+        XCTAssertEqual(store.sections, ["Work"])
+        XCTAssertEqual(store.notes.first(where: { $0.id == id })?.listName, "Work")
+        XCTAssertEqual(store.activeSection, "Work")
+    }
+
     // MARK: - createSection
 
     func testCreateSectionTrimsAndActivates() {

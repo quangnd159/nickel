@@ -219,9 +219,10 @@ final class NoteStore: ObservableObject {
 
         // If an existing (different) section already has this name
         // case-insensitively, merge into it using its existing casing.
-        let canonicalName = sections.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame } ?? trimmed
-
-        guard canonicalName != oldName else { return }
+        // The section being renamed itself is excluded so case-only
+        // renames (e.g. "work" -> "Work") fall through to the in-place
+        // rename branch below instead of matching themselves.
+        let canonicalName = sections.first { $0 != oldName && $0.caseInsensitiveCompare(trimmed) == .orderedSame } ?? trimmed
 
         for index in notes.indices where notes[index].listName == oldName {
             notes[index].listName = canonicalName
