@@ -162,4 +162,81 @@ final class PanelActionsTests: XCTestCase {
         XCTAssertTrue(store.notes[0].isDone)
         XCTAssertFalse(store.notes[1].isDone)
     }
+
+    // MARK: - allSelectedAreDone
+
+    func testAllSelectedAreDoneIsFalseWhenSelectionIsEmpty() {
+        store.add(text: "a", sourceApp: nil)
+
+        XCTAssertFalse(actions.allSelectedAreDone)
+    }
+
+    func testAllSelectedAreDoneIsFalseWhenSelectionIsMixed() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+        store.toggleDone(ids: [ids[0]])
+
+        selection.selectedIDs = Set(ids)
+
+        XCTAssertFalse(actions.allSelectedAreDone)
+    }
+
+    func testAllSelectedAreDoneIsTrueWhenAllSelectedAreDone() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+        store.toggleDone(ids: Set(ids))
+
+        selection.selectedIDs = Set(ids)
+
+        XCTAssertTrue(actions.allSelectedAreDone)
+    }
+
+    // MARK: - Duplicate note ids (corrupt store) regression
+
+    /// Guards against `notes(for:)`/`allSelectedAreDone` trapping when
+    /// `notes.json` was hand-edited to contain two notes sharing the same
+    /// `id` (the file is user-facing via "Reveal Notes in Finder"). Before
+    /// the duplicate-tolerant dictionary fix, `Dictionary(uniqueKeysWithValues:)`
+    /// would crash the process on this input.
+    func testActionsSurviveDuplicateNoteIDsInStore() {
+        let duplicateID = UUID().uuidString
+        let json = """
+        {
+          "version": 2,
+          "sections": [],
+          "activeSection": null,
+          "notes": [
+            {
+              "id": "\(duplicateID)",
+              "text": "first",
+              "listName": null,
+              "isDone": false,
+              "createdAt": "2024-01-01T00:00:00Z",
+              "sourceApp": null
+            },
+            {
+              "id": "\(duplicateID)",
+              "text": "second",
+              "listName": null,
+              "isDone": true,
+              "createdAt": "2024-01-02T00:00:00Z",
+              "sourceApp": null
+            }
+          ]
+        }
+        """
+        try! json.data(using: .utf8)!.write(to: fileURL)
+
+        let duplicateStore = NoteStore(fileURL: fileURL)
+        let duplicateSelection = SelectionModel(store: duplicateStore)
+        let duplicateActions = PanelActions(store: duplicateStore, selection: duplicateSelection)
+
+        duplicateSelection.selectedIDs = Set(duplicateStore.notes.map(\.id))
+
+        // Must not trap.
+        _ = duplicateActions.allSelectedAreDone
+        duplicateActions.toggleDone()
+    }
 }

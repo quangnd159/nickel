@@ -316,8 +316,9 @@ struct PanelView: View {
                             // per-identity cell cache would keep serving the
                             // pre-move Note snapshot (stale done-checkbox).
                             // These lists are small, so laziness buys nothing.
+                            let grouped = selection.filteredNotesBySection
                             VStack(alignment: .leading, spacing: 10) {
-                                ForEach(selection.notes(in: nil)) { note in
+                                ForEach(grouped[String?.none] ?? []) { note in
                                     NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                         .transition(rowTransition)
                                 }
@@ -334,7 +335,7 @@ struct PanelView: View {
                                         .padding(.top, 12)
                                         .transition(rowTransition)
 
-                                    ForEach(selection.notes(in: sectionName)) { note in
+                                    ForEach(grouped[sectionName] ?? []) { note in
                                         NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
                                             .transition(rowTransition)
                                     }
