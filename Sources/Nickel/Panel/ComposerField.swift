@@ -21,6 +21,10 @@ extension Notification.Name {
 /// card.
 struct ComposerField: NSViewRepresentable {
     @Binding var text: String
+    /// Mirrors the field's first-responder state, so the composer card
+    /// around it can draw a focus ring (SwiftUI's `@FocusState` doesn't reach
+    /// into an `NSViewRepresentable`).
+    @Binding var isFocused: Bool
     var placeholder: String = "Add a note or a prompt"
     /// Called when plain Return is pressed. The caller adds the note and
     /// clears the text; focus is deliberately kept so the next note can be
@@ -47,6 +51,9 @@ struct ComposerField: NSViewRepresentable {
             ]
         )
         field.stringValue = text
+        field.onFocusChange = { [weak coordinator = context.coordinator] focused in
+            coordinator?.isFocused.wrappedValue = focused
+        }
         context.coordinator.field = field
         return field
     }
@@ -57,19 +64,22 @@ struct ComposerField: NSViewRepresentable {
             nsView.invalidateIntrinsicContentSize()
         }
         context.coordinator.onCommit = onCommit
+        context.coordinator.isFocused = $isFocused
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(text: $text, onCommit: onCommit)
+        Coordinator(text: $text, isFocused: $isFocused, onCommit: onCommit)
     }
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         private let text: Binding<String>
+        var isFocused: Binding<Bool>
         var onCommit: () -> Void
         weak var field: NSTextField?
 
-        init(text: Binding<String>, onCommit: @escaping () -> Void) {
+        init(text: Binding<String>, isFocused: Binding<Bool>, onCommit: @escaping () -> Void) {
             self.text = text
+            self.isFocused = isFocused
             self.onCommit = onCommit
             super.init()
             NotificationCenter.default.addObserver(

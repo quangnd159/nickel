@@ -17,6 +17,16 @@ extension Notification.Name {
     static let nickelClosePanel = Notification.Name("NickelClosePanel")
 }
 
+extension View {
+    /// The panel's single elevation treatment: a soft drop shadow that lifts
+    /// a control off the background material. Shared by the search capsule,
+    /// the ⋯ button, the composer card, and the floating pills so they all
+    /// sit at the same apparent height.
+    func panelElevation() -> some View {
+        shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+    }
+}
+
 struct VisualEffectBackground: NSViewRepresentable {
     var material: NSVisualEffectView.Material = .hudWindow
 
@@ -76,6 +86,28 @@ struct PanelView: View {
     /// before deleting; `nil` when no confirmation is pending. See
     /// `requestDeleteSection`.
     @State private var sectionDeleteConfirmation: SectionDeleteConfirmation?
+    /// Mirrors the composer field's first-responder state (see
+    /// `ComposerField.isFocused`), driving the card's focus ring.
+    @State private var isComposerFocused = false
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    /// Corner radius of the composer card. Larger than a note row's so the
+    /// tallest control in the panel stays visually concentric inside the
+    /// 30pt window, matching Copper's proportions.
+    private static let composerCornerRadius: CGFloat = 24
+
+    /// Resting height of the composer card: twice the search capsule's 32pt,
+    /// so an empty composer already reads as a roomy text area inviting a
+    /// longer note rather than a padded single-line field. The content row
+    /// sits at the top and the growing field expands past this on its own.
+    private static let composerMinHeight: CGFloat = 64
+
+    /// The composer's focus ring follows AppKit: only while the field
+    /// actually holds focus and the panel is the key window, and never while
+    /// a drag is targeted (the dashed drop border takes over there).
+    private var showsComposerFocusRing: Bool {
+        isComposerFocused && !isComposerDropTargeted && controlActiveState == .key
+    }
 
     var body: some View {
         ZStack {
@@ -131,7 +163,7 @@ struct PanelView: View {
                     .transition(sectionSwitchTransition)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .onReceive(NotificationCenter.default.publisher(for: .nickelToggleSectionSwitcher)) { _ in
             toggleSectionSwitcher()
         }
@@ -202,11 +234,15 @@ struct PanelView: View {
                     .font(.system(size: 13))
                     .accessibilityLabel("Search")
             }
-            .padding(.horizontal, 12)
+            // A capsule rather than a rounded rect, and nearly opaque, so it
+            // reads as a raised control sitting on the panel's material
+            // instead of a well cut into it.
+            .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.5))
+                Capsule()
+                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.85))
+                    .panelElevation()
             )
 
             Menu {
@@ -284,12 +320,22 @@ struct PanelView: View {
                 Image(systemName: "ellipsis")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(Circle().fill(.quaternary))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            // The circle sits behind the whole `Menu`, and the 32pt frame is
+            // set out here too: `.borderlessButton` rasterizes the label down
+            // to its glyph, so neither a background nor a frame applied
+            // inside it survives. Same raised, near-opaque treatment as the
+            // search capsule beside it, at the capsule's own 32pt height, so
+            // the two read as one control row.
+            .frame(width: 32, height: 32)
+            .background(
+                Circle()
+                    .fill(Color(nsColor: .textBackgroundColor).opacity(0.85))
+                    .panelElevation()
+            )
         }
     }
 
@@ -601,7 +647,7 @@ struct PanelView: View {
                     .frame(height: 19)
                     .accessibilityHidden(true)
 
-                ComposerField(text: $composerText, onCommit: commitComposer)
+                ComposerField(text: $composerText, isFocused: $isComposerFocused, onCommit: commitComposer)
                     .font(.system(size: 14))
                     .accessibilityLabel("Add a note or a prompt")
 
@@ -618,14 +664,28 @@ struct PanelView: View {
         // contents (Copper's look) instead of replacing them — the card
         // never resizes as a drag enters or leaves.
         .opacity(isComposerDropTargeted ? 0.35 : 1)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 15)
+        .frame(minHeight: Self.composerMinHeight, alignment: .top)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.composerCornerRadius, style: .continuous)
                 .fill(isComposerDropTargeted ? Color.accentColor.opacity(0.08) : Color(nsColor: .textBackgroundColor))
+                .panelElevation()
+        )
+        // Stands in for the field's own suppressed focus ring
+        // (`ComposerField` sets `.focusRingType = .none`) so the ring follows
+        // the card rather than the bare text. Centered on the card's edge
+        // rather than inset: `keyboardFocusIndicatorColor` is the accent at
+        // half alpha, which washes out to nothing when it composites entirely
+        // over the card's own light fill — straddling the edge is also how
+        // AppKit draws it, half over the control and half over what's behind.
+        .overlay(
+            RoundedRectangle(cornerRadius: Self.composerCornerRadius, style: .continuous)
+                .stroke(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
+                .opacity(showsComposerFocusRing ? 1 : 0)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: Self.composerCornerRadius, style: .continuous)
                 .strokeBorder(Color.accentColor, style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
                 .opacity(isComposerDropTargeted ? 1 : 0)
         )
@@ -664,7 +724,7 @@ struct PanelView: View {
         .padding(.vertical, 8)
         .background(
             Capsule().fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+                .panelElevation()
         )
     }
 
@@ -680,7 +740,7 @@ struct PanelView: View {
         .padding(.vertical, 7)
         .background(
             Capsule().fill(.regularMaterial)
-                .shadow(color: .black.opacity(0.15), radius: 8, y: 2)
+                .panelElevation()
         )
     }
 
