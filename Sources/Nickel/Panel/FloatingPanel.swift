@@ -517,6 +517,8 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             actions.selection.moveSelection(direction: -1, extend: modifiers == [.shift])
         case .edit:
             actions.startEditingIfSingleSelected()
+        case .editInNewWindow:
+            actions.editInNewWindow()
         case .toggleDone:
             actions.toggleDone()
         case .delete:

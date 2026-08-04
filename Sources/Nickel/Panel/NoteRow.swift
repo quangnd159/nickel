@@ -395,6 +395,10 @@ struct NoteRow: View {
             .panelKeyboardShortcut(.edit)
             .disabled(selection.selectedIDs.count != 1)
 
+        Button("Edit in New Window") { actions.editInNewWindow() }
+            .panelKeyboardShortcut(.editInNewWindow)
+            .disabled(selection.selectedIDs.count != 1)
+
         Button("Merge Notes") { actions.merge() }
             .panelKeyboardShortcut(.merge)
             .disabled(selection.selectedIDs.count < 2)

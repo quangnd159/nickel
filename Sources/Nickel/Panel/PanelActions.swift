@@ -87,6 +87,21 @@ final class PanelActions: ObservableObject {
         selection.beginEditing(id: id, text: note.text)
     }
 
+    /// Opens the single selected note in its own window. Any in-progress
+    /// inline edit is committed first, so the window opens on the text the
+    /// user can actually see rather than a stale snapshot.
+    ///
+    /// Posts rather than calling the window manager: those windows are owned
+    /// app-wide by `AppDelegate`, which the panel has no handle on (the same
+    /// reason `.nickelClosePanel` exists).
+    func editInNewWindow() {
+        commitActiveEditIfAny()
+        guard selection.selectedIDs.count == 1,
+              let id = selection.selectedIDs.first,
+              store.notes.contains(where: { $0.id == id }) else { return }
+        NotificationCenter.default.post(name: .nickelEditNoteInNewWindow, object: id)
+    }
+
     /// Commits whatever note is currently mid-edit (if any) and exits edit
     /// mode. Called before selection-mutating actions (clicking another row,
     /// clicking the background) so the previously-edited note's text is

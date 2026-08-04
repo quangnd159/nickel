@@ -149,6 +149,57 @@ final class PanelActionsTests: XCTestCase {
         XCTAssertNil(selection.editingID)
     }
 
+    // MARK: - editInNewWindow
+
+    /// The posted note ids, collected while `body` runs.
+    private func requestedEditorNoteIDs(during body: () -> Void) -> [UUID] {
+        var posted: [UUID] = []
+        let observer = NotificationCenter.default.addObserver(
+            forName: .nickelEditNoteInNewWindow,
+            object: nil,
+            queue: nil
+        ) { notification in
+            if let id = notification.object as? UUID { posted.append(id) }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        body()
+        return posted
+    }
+
+    func testEditInNewWindowRequestsTheSingleSelectedNote() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+        selection.selectSingle(ids[1])
+
+        XCTAssertEqual(requestedEditorNoteIDs { actions.editInNewWindow() }, [ids[1]])
+    }
+
+    func testEditInNewWindowIgnoresMultiSelection() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        selection.selectedIDs = Set(store.notes.map(\.id))
+
+        XCTAssertTrue(requestedEditorNoteIDs { actions.editInNewWindow() }.isEmpty)
+    }
+
+    func testEditInNewWindowIgnoresEmptySelection() {
+        store.add(text: "a", sourceApp: nil)
+
+        XCTAssertTrue(requestedEditorNoteIDs { actions.editInNewWindow() }.isEmpty)
+    }
+
+    func testEditInNewWindowCommitsAnInProgressInlineEditFirst() {
+        store.add(text: "original", sourceApp: nil)
+        let id = store.notes[0].id
+        selection.selectSingle(id)
+        selection.beginEditing(id: id, text: "edited text")
+
+        XCTAssertEqual(requestedEditorNoteIDs { actions.editInNewWindow() }, [id])
+        XCTAssertEqual(store.notes[0].text, "edited text")
+        XCTAssertNil(selection.editingID)
+    }
+
     // MARK: - toggleDone
 
     func testToggleDoneTogglesExactlyTheSelection() {

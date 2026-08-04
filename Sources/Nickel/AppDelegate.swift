@@ -6,6 +6,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var trustPollTimer: Timer?
 
     private let noteStore = NoteStore()
+    private lazy var noteEditorWindows = NoteEditorWindowManager(store: noteStore)
     private var isCapturing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -34,6 +35,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             queue: .main
         ) { [weak self] _ in
             self?.statusItem?.isVisible = PanelSettings.showMenuBarIcon
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: .nickelEditNoteInNewWindow,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let noteID = notification.object as? UUID else { return }
+            self?.noteEditorWindows.open(noteID: noteID)
         }
 
         HotkeyMonitor.shared.onDoubleShift = { [weak self] side in self?.handleDoubleShift(side) }

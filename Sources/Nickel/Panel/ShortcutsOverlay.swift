@@ -60,6 +60,7 @@ struct ShortcutsOverlay: View {
                 overlayRow(.copyAsList),
                 overlayRow(.toggleDone),
                 overlayRow(.edit),
+                overlayRow(.editInNewWindow),
                 overlayRow(.toggleExpanded),
                 overlayRow(.merge),
                 overlayRow(.delete)
