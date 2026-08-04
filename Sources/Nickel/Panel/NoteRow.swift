@@ -18,6 +18,7 @@ struct NoteRow: View {
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
     @FocusState private var editFocus: Bool
+    @Environment(\.controlActiveState) private var controlActiveState
 
     /// Frames (in the row's own coordinate space, see `attachmentsSpace`) of
     /// each rendered attachment thumbnail/card, kept live via
@@ -35,6 +36,17 @@ struct NoteRow: View {
 
     private var isSelected: Bool { selection.selectedIDs.contains(note.id) }
     private var isEditing: Bool { selection.editingID == note.id }
+
+    /// Selection outline color. AppKit draws selection with the accent color
+    /// only while the window is key and drops to the unemphasized gray
+    /// otherwise (`NSTableView`'s emphasized/unemphasized pair), so the row
+    /// follows the same rule rather than staying vividly selected behind an
+    /// inactive panel.
+    private var selectionStroke: Color {
+        controlActiveState == .key
+            ? .accentColor
+            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
+    }
     private static let attachmentsSpace = "NoteRow.attachments"
 
     /// Gap between the checkbox and the note content. Shared by the HStack
@@ -80,7 +92,7 @@ struct NoteRow: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .strokeBorder(Color.accentColor, lineWidth: 2)
+                .strokeBorder(selectionStroke, lineWidth: 2)
                 .opacity(isSelected ? 1 : 0)
         )
         .coordinateSpace(name: Self.attachmentsSpace)

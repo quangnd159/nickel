@@ -40,6 +40,13 @@ struct SectionSwitcher: View {
 
     @State private var query = ""
     @State private var highlightedIndex = 0
+    @Environment(\.controlActiveState) private var controlActiveState
+
+    /// Whether the highlighted row draws with the emphasized (accent-filled,
+    /// white-on-blue) treatment. Native lists only do that while their window
+    /// is key; behind an inactive panel the palette drops to the unemphasized
+    /// gray fill with normal label colors, matching `NoteRow`'s selection.
+    private var isEmphasized: Bool { controlActiveState == .key }
 
     var body: some View {
         GeometryReader { geometry in
@@ -110,10 +117,14 @@ struct SectionSwitcher: View {
     }
 
     private func resultRow(_ result: Result, isHighlighted: Bool) -> some View {
-        HStack(spacing: 8) {
+        // White labels only go with the emphasized (accent) fill; the
+        // unemphasized gray needs the normal label colors to stay legible.
+        let usesAccentFill = isHighlighted && isEmphasized
+
+        return HStack(spacing: 8) {
             Text(label(for: result))
                 .font(.system(size: 13))
-                .foregroundStyle(isHighlighted ? .white : .primary)
+                .foregroundStyle(usesAccentFill ? Color.white : Color.primary)
                 .lineLimit(1)
 
             Spacer()
@@ -121,16 +132,23 @@ struct SectionSwitcher: View {
             if isActive(result) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isHighlighted ? .white : .secondary)
+                    .foregroundStyle(usesAccentFill ? Color.white : Color.secondary)
             }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(isHighlighted ? Color(nsColor: .selectedContentBackgroundColor) : Color.clear)
+                .fill(highlightFill(isHighlighted: isHighlighted))
         )
         .contentShape(Rectangle())
+    }
+
+    private func highlightFill(isHighlighted: Bool) -> Color {
+        guard isHighlighted else { return .clear }
+        return isEmphasized
+            ? Color(nsColor: .selectedContentBackgroundColor)
+            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
     }
 
     // MARK: - Results
