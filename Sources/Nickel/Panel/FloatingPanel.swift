@@ -413,7 +413,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         guard !NSApp.isActive else { return }
         if let front = NSWorkspace.shared.frontmostApplication,
            front != .current,
-           NSRunningApplication.current.activate(from: front, options: [.activateIgnoringOtherApps]) {
+           NSRunningApplication.current.activate(from: front, options: []) {
             return
         }
         NSApp.activate()

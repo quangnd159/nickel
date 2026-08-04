@@ -82,7 +82,7 @@ Arrow keys move the selection; hold ⇧ to extend a range.
 
 ## Build & install
 
-Requires macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`)
+Requires macOS 26+ and the Xcode Command Line Tools (`xcode-select --install`)
 — a full Xcode.app install also works and isn't required either way.
 
 ```bash

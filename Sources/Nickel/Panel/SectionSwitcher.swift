@@ -295,7 +295,7 @@ struct SectionSwitcher: View {
 /// A borderless, single-line `NSTextField` for `SectionSwitcher`'s query.
 ///
 /// Backed by `NSViewRepresentable` (rather than SwiftUI's `TextField` with
-/// `.onKeyPress`, which the app's macOS 14 floor would technically support)
+/// `.onKeyPress`, which the app's macOS 26 floor would technically support)
 /// to match the established pattern of `SearchField`/`ComposerField`: Up/Down
 /// need to drive the palette's highlighted row and Return/Esc need
 /// context-independent commit/cancel behavior, all of which are cleanest to
