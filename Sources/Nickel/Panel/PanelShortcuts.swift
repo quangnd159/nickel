@@ -15,6 +15,7 @@ enum PanelCommand: CaseIterable {
     case moveDown
     case moveUp
     case edit
+    case editInNewWindow
     case toggleDone
     case delete
     case escape
@@ -24,25 +25,33 @@ enum PanelCommand: CaseIterable {
     case merge
 }
 
-/// How a command is recognized in an incoming `NSEvent`. The arrows, Return,
-/// Space, Delete/Forward-Delete and Escape match on `keyCode` alone,
-/// regardless of modifiers; the rest match on `charactersIgnoringModifiers`
-/// (lowercased) plus an exact modifier-flag set.
+/// How a command is recognized in an incoming `NSEvent`. `keyCode` entries
+/// state their modifier policy explicitly: `nil` matches whatever modifiers
+/// are held (the arrows need this — ⇧↑/⇧↓ extend the selection through the
+/// same two commands), while an exact set matches only that set. Return uses
+/// the exact form so plain ↩ (edit inline) and ⌘↩ (edit in a new window)
+/// stay distinct rather than both firing. `character` entries match on
+/// `charactersIgnoringModifiers` (lowercased) plus an exact modifier set.
 enum PanelShortcutMatch {
-    case keyCode(UInt16)
+    case keyCode(UInt16, modifiers: NSEvent.ModifierFlags?)
     case keyCodes([UInt16])
     case character(String, modifiers: NSEvent.ModifierFlags)
 
     func matches(_ event: NSEvent) -> Bool {
         switch self {
-        case .keyCode(let code):
-            return event.keyCode == code
+        case .keyCode(let code, let modifiers):
+            guard event.keyCode == code else { return false }
+            return modifiers.map { $0 == Self.exactModifiers(of: event) } ?? true
         case .keyCodes(let codes):
             return codes.contains(event.keyCode)
         case .character(let character, let modifiers):
-            let eventModifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            return eventModifiers == modifiers && event.charactersIgnoringModifiers?.lowercased() == character
+            return Self.exactModifiers(of: event) == modifiers
+                && event.charactersIgnoringModifiers?.lowercased() == character
         }
+    }
+
+    private static func exactModifiers(of event: NSEvent) -> NSEvent.ModifierFlags {
+        event.modifierFlags.intersection([.command, .shift, .option, .control])
     }
 }
 
@@ -65,25 +74,31 @@ enum PanelShortcuts {
     static let all: [PanelShortcut] = [
         PanelShortcut(
             command: .moveDown,
-            match: .keyCode(125),
+            match: .keyCode(125, modifiers: nil),
             menuShortcut: nil,
             overlay: ("Move selection", ["↓"])
         ),
         PanelShortcut(
             command: .moveUp,
-            match: .keyCode(126),
+            match: .keyCode(126, modifiers: nil),
             menuShortcut: nil,
             overlay: ("Move selection", ["↑"])
         ),
         PanelShortcut(
             command: .edit,
-            match: .keyCode(36),
+            match: .keyCode(36, modifiers: []),
             menuShortcut: KeyboardShortcut(.return, modifiers: []),
             overlay: ("Edit note", ["↩"])
         ),
         PanelShortcut(
+            command: .editInNewWindow,
+            match: .keyCode(36, modifiers: [.command]),
+            menuShortcut: KeyboardShortcut(.return, modifiers: .command),
+            overlay: ("Edit in new window", ["⌘", "↩"])
+        ),
+        PanelShortcut(
             command: .toggleDone,
-            match: .keyCode(49),
+            match: .keyCode(49, modifiers: nil),
             menuShortcut: KeyboardShortcut(" ", modifiers: []),
             overlay: ("Toggle done", ["Space"])
         ),
@@ -95,7 +110,7 @@ enum PanelShortcuts {
         ),
         PanelShortcut(
             command: .escape,
-            match: .keyCode(53),
+            match: .keyCode(53, modifiers: nil),
             menuShortcut: nil,
             overlay: nil
         ),
