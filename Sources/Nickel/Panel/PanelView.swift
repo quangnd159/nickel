@@ -674,14 +674,15 @@ struct PanelView: View {
         )
         // Stands in for the field's own suppressed focus ring
         // (`ComposerField` sets `.focusRingType = .none`) so the ring follows
-        // the card rather than the bare text. Centered on the card's edge
-        // rather than inset: `keyboardFocusIndicatorColor` is the accent at
-        // half alpha, which washes out to nothing when it composites entirely
-        // over the card's own light fill — straddling the edge is also how
-        // AppKit draws it, half over the control and half over what's behind.
+        // the card rather than the bare text. Full-strength accent rather
+        // than `keyboardFocusIndicatorColor` (accent at half alpha): the
+        // selected-note stroke is already full accent, and two weights of
+        // the same blue in one view read as an inconsistency, not a
+        // hierarchy. Centered on the card's edge — half over the control,
+        // half over what's behind — which is also how AppKit draws rings.
         .overlay(
             RoundedRectangle(cornerRadius: Self.composerCornerRadius, style: .continuous)
-                .stroke(Color(nsColor: .keyboardFocusIndicatorColor), lineWidth: 3)
+                .stroke(Color(nsColor: .controlAccentColor), lineWidth: 3)
                 .opacity(showsComposerFocusRing ? 1 : 0)
         )
         .overlay(
