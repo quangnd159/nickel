@@ -67,11 +67,7 @@ struct ShortcutsOverlay: View {
             ])
         }
         .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
-        )
+        .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
     }
 
     /// One shortcut group: a tiny secondary header followed by its rows.

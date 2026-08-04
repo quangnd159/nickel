@@ -108,11 +108,7 @@ struct SectionSwitcher: View {
                 }
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color(nsColor: .windowBackgroundColor))
-                .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
-        )
+        .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
         .onChange(of: query) { _, _ in highlightedIndex = 0 }
     }
 
