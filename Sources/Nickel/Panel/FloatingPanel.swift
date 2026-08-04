@@ -197,18 +197,39 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     // MARK: - Show / hide
 
-    /// Toggles panel visibility with a subtle slide-and-fade. Uses a
-    /// generation counter so that whichever of show/hide was requested most
+    /// Three-state cycle, matching iTerm2's hotkey window / Quake-style
+    /// terminals / Fantastical's mini window: hidden → show + focus; visible
+    /// but not focused (user clicked into another app, panel stayed on
+    /// screen) → bring to front and focus, without hiding; visible and
+    /// focused → hide. Since the panel isn't `.nonactivatingPanel`, "visible
+    /// but unfocused" in practice means Nickel isn't the active app, so
+    /// `isKeyWindow && NSApp.isActive` is the frontmost-and-focused check.
+    ///
+    /// Uses a generation counter so that whichever call was requested most
     /// recently always wins: if a hide's fade-out is still animating when a
-    /// new show comes in (rapid double-shift), the hide's completion handler
-    /// detects it's stale and skips `orderOut`, so the panel doesn't get
-    /// hidden right after being shown again.
+    /// new show/refocus comes in (rapid double-shift), the hide's completion
+    /// handler detects it's stale and skips `orderOut`, so the panel doesn't
+    /// get hidden right after being shown/refocused again.
     func toggle() {
         toggleGeneration += 1
         let generation = toggleGeneration
 
         if isVisible {
-            animateHide(generation: generation)
+            if isKeyWindow && NSApp.isActive {
+                animateHide(generation: generation)
+            } else if isAnimatingToggle {
+                // Mid-animation (a hide fading out, or a show still settling):
+                // the frame/alpha aren't at rest, so route through the show
+                // animation, which resets both; the generation check above
+                // already makes any stale in-flight hide a no-op.
+                animateShow(generation: generation)
+            } else {
+                // At rest on screen, just not focused: bring forward without
+                // replaying the slide/fade (it's already in place) and without
+                // resetting first responder (AppKit restores it on its own).
+                activateForSummon()
+                makeKeyAndOrderFront(nil)
+            }
         } else {
             animateShow(generation: generation)
         }
