@@ -506,9 +506,20 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         // scrolling before it lands measures the caret against a stale
         // frame (which showed up as the reveal stopping a line short).
         DispatchQueue.main.async { [weak editor, weak field] in
-            guard let editor else { return }
-            field?.window?.layoutIfNeeded()
+            guard let editor, let field else { return }
+            field.window?.layoutIfNeeded()
             editor.scrollRangeToVisible(editor.selectedRange())
+            // `scrollRangeToVisible` stops exactly at the caret's line,
+            // which leaves the card's bottom chrome below it (the row's
+            // 13pt vertical padding plus the 2pt selection stroke) clipped
+            // when editing begins at the end of a note near the viewport
+            // bottom. Also reveal that strip; a no-op when it's already
+            // on screen.
+            let bottomChrome: CGFloat = 15
+            field.scrollToVisible(NSRect(
+                x: 0, y: field.bounds.maxY,
+                width: field.bounds.width, height: bottomChrome
+            ))
         }
     }
 
