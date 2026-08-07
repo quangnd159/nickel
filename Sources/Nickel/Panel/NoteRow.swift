@@ -17,7 +17,11 @@ struct NoteRow: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
-    @FocusState private var editFocus: Bool
+    /// Mirrors the inline editor's first-responder state (see
+    /// `InlineNoteEditorField`), the same pattern `ComposerField` and
+    /// `NoteSourceTextView` use since `@FocusState` doesn't reach into an
+    /// `NSViewRepresentable`.
+    @State private var editFieldFocused: Bool = false
     @Environment(\.controlActiveState) private var controlActiveState
 
     /// Frames (in the row's own coordinate space, see `attachmentsSpace`) of
@@ -136,18 +140,14 @@ struct NoteRow: View {
     }
 
     private var editField: some View {
-        TextField("", text: editingTextBinding, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.system(size: 14))
-            .lineSpacing(2)
-            .lineLimit(1...)
-            .focused($editFocus)
-            .onAppear(perform: focusEditField)
-            .onChange(of: isEditing, focusEditFieldIfNowEditing)
-            .onChange(of: editFocus, commitOnFocusLoss)
-            .onKeyPress(.return, phases: .down) { (press: KeyPress) in handleReturnKeyPress(press) }
-            .onKeyPress(.escape) { handleEscapeKeyPress() }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        InlineNoteEditorField(
+            text: editingTextBinding,
+            isFocused: $editFieldFocused,
+            onCommit: commitEdit,
+            onCancel: { selection.endEditing() }
+        )
+        .onChange(of: editFieldFocused, commitOnFocusLoss)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var isExpanded: Bool { selection.expandedIDs.contains(note.id) }
@@ -279,6 +279,11 @@ struct NoteRow: View {
         // is saved before selection moves on.
         actions.commitActiveEditIfAny()
         guard !isEditing else { return }
+        // Selecting a row this way is a click outside any text field, so it
+        // should behave like the background click handler and give up text
+        // focus (composer or search field) — otherwise `FloatingPanel`'s
+        // `isEditingText` gate keeps suppressing list keyboard shortcuts.
+        NSApp.keyWindow?.makeFirstResponder(nil)
         let flags = NSEvent.modifierFlags
         selection.handleClick(on: note.id, shift: flags.contains(.shift), command: flags.contains(.command))
     }
@@ -311,20 +316,12 @@ struct NoteRow: View {
         actions.commitActiveEditIfAny()
     }
 
-    // MARK: - Inline edit field focus/keys
+    // MARK: - Inline edit field focus
     //
-    // Broken out into named methods (rather than inline closures on the
-    // `TextField` modifier chain) because the chain otherwise took the
-    // type-checker too long to solve, per "the compiler is unable to
-    // type-check this expression in reasonable time".
-
-    private func focusEditField() {
-        editFocus = true
-    }
-
-    private func focusEditFieldIfNowEditing(_ old: Bool, _ editing: Bool) {
-        if editing { editFocus = true }
-    }
+    // `InlineNoteEditorField` (an `NSViewRepresentable`) owns focus-on-start
+    // and Return/Escape handling directly at the field-editor level; this is
+    // just the click-away commit that SwiftUI-level state still needs to
+    // drive.
 
     /// Click-away commit: fires whenever the field's focus changes, which
     /// covers losing focus to another control (search field, composer,
@@ -333,26 +330,6 @@ struct NoteRow: View {
     private func commitOnFocusLoss(_ old: Bool, _ focused: Bool) {
         guard !focused, isEditing else { return }
         commitEdit()
-    }
-
-    /// `TextField(axis: .vertical)` inserts a newline for plain Return by
-    /// default (it only calls `onSubmit` for single-line fields), so Shift
-    /// is not actually needed to get a newline here — but we still want
-    /// plain Return to commit. Returning `.ignored` for Shift+Return lets
-    /// the field's default newline insertion run; returning `.handled` for
-    /// plain Return swallows the keystroke (no newline inserted) and commits
-    /// instead.
-    private func handleReturnKeyPress(_ press: KeyPress) -> KeyPress.Result {
-        if press.modifiers.contains(.shift) {
-            return .ignored
-        }
-        commitEdit()
-        return .handled
-    }
-
-    private func handleEscapeKeyPress() -> KeyPress.Result {
-        selection.endEditing()
-        return .handled
     }
 
     /// Collapsed preview text: block markers (heading `#`, list `-`/`1.`,
@@ -416,6 +393,115 @@ struct NoteRow: View {
 
         Button("Delete") { actions.delete() }
             .panelKeyboardShortcut(.delete)
+    }
+}
+
+// MARK: - Inline editor text surface
+
+/// The inline note editor's text surface: a borderless, auto-growing
+/// `NSTextField` (the same `GrowingTextField` the composer uses in
+/// `ComposerField`) rather than SwiftUI's `TextField(axis: .vertical)`.
+///
+/// Two things that field can't do on macOS drove the switch. First, Shift
+/// and plain Return need different behavior (newline vs. commit), but
+/// `TextField(axis: .vertical)`'s default Return handling only calls
+/// `onSubmit` for single-line fields — there's no default newline binding to
+/// key off of, and no `doCommandBy:` hook to reach without dropping to
+/// AppKit. Second, editing should start with the caret at the end of the
+/// text, not the field's default select-all.
+private struct InlineNoteEditorField: NSViewRepresentable {
+    @Binding var text: String
+    /// Mirrors the field's first-responder state, the same pattern
+    /// `ComposerField` uses, so `NoteRow` can commit on focus loss.
+    @Binding var isFocused: Bool
+    /// Called when plain Return is pressed.
+    var onCommit: () -> Void
+    /// Called when Escape is pressed.
+    var onCancel: () -> Void
+
+    func makeNSView(context: Context) -> GrowingTextField {
+        let field = GrowingTextField()
+        field.delegate = context.coordinator
+        field.isBordered = false
+        field.drawsBackground = false
+        field.focusRingType = .none
+        field.font = .systemFont(ofSize: 14)
+        field.usesSingleLineMode = false
+        field.cell?.wraps = true
+        field.cell?.isScrollable = false
+        field.lineBreakMode = .byWordWrapping
+        field.stringValue = text
+        field.onFocusChange = { [weak coordinator = context.coordinator] focused in
+            coordinator?.isFocused.wrappedValue = focused
+        }
+
+        // Editing always starts on a freshly created field — `NoteRow`
+        // swaps this view in for `displayText` from scratch when it enters
+        // edit mode — so this is the one moment to claim first responder and
+        // park the caret at the end. Deferred a runloop turn, same as
+        // `HeaderRenameField`: a field created mid-layout-pass can have
+        // `makeFirstResponder` silently no-op.
+        DispatchQueue.main.async {
+            field.window?.makeFirstResponder(field)
+            if let editor = field.currentEditor() {
+                editor.moveToEndOfDocument(nil)
+            } else {
+                DispatchQueue.main.async {
+                    field.window?.makeFirstResponder(field)
+                    field.currentEditor()?.moveToEndOfDocument(nil)
+                }
+            }
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: GrowingTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+            nsView.invalidateIntrinsicContentSize()
+        }
+        context.coordinator.onCommit = onCommit
+        context.coordinator.isFocused = $isFocused
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(text: $text, onCommit: onCommit, onCancel: onCancel, isFocused: $isFocused)
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        private let text: Binding<String>
+        var onCommit: () -> Void
+        private let onCancel: () -> Void
+        var isFocused: Binding<Bool>
+
+        init(text: Binding<String>, onCommit: @escaping () -> Void, onCancel: @escaping () -> Void, isFocused: Binding<Bool>) {
+            self.text = text
+            self.onCommit = onCommit
+            self.onCancel = onCancel
+            self.isFocused = isFocused
+        }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? GrowingTextField else { return }
+            text.wrappedValue = field.stringValue
+            field.syncIntrinsicSizeWithEditor()
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                if NSEvent.modifierFlags.contains(.shift) {
+                    textView.insertNewlineIgnoringFieldEditor(nil)
+                } else {
+                    onCommit()
+                }
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                onCancel()
+                return true
+            }
+            return false
+        }
     }
 }
 

@@ -32,7 +32,9 @@ final class NoteEditorWindowManager {
         guard let note = store.notes.first(where: { $0.id == noteID }) else { return }
 
         if let existing = controllers[noteID] {
+            NSApp.activate(ignoringOtherApps: true)
             existing.window?.makeKeyAndOrderFront(nil)
+            existing.focusTextView()
             return
         }
 
@@ -54,7 +56,9 @@ final class NoteEditorWindowManager {
         }
 
         controller.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
         controller.window?.makeKeyAndOrderFront(nil)
+        controller.focusTextView()
     }
 }
 
@@ -128,6 +132,37 @@ final class NoteEditorWindowController: NSWindowController, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         noteObserver = nil
         onClose?()
+    }
+
+    /// Hands first responder to the editor's `NSTextView` with the caret at
+    /// the end of the text, so a window opened via ⌘↩ (or re-fronted for a
+    /// note that already has one) is immediately typeable instead of needing
+    /// an extra click. Finds the text view by walking the hosting view's
+    /// hierarchy rather than reaching into `NoteSourceTextView`'s private
+    /// `FocusReportingTextView` type.
+    ///
+    /// Deferred a runloop turn, same as `HeaderRenameField`: right after
+    /// `showWindow`, the `NSHostingView`'s subviews (the scroll view and text
+    /// view SwiftUI builds for `NoteSourceTextView`) haven't necessarily been
+    /// materialized yet.
+    func focusTextView() {
+        DispatchQueue.main.async { [weak self] in
+            guard let contentView = self?.window?.contentView,
+                  let textView = contentView.firstDescendantTextView() else { return }
+            self?.window?.makeFirstResponder(textView)
+            textView.setSelectedRange(NSRange(location: (textView.string as NSString).length, length: 0))
+        }
+    }
+}
+
+private extension NSView {
+    /// Depth-first search for the first `NSTextView` in this view's subtree.
+    func firstDescendantTextView() -> NSTextView? {
+        if let textView = self as? NSTextView { return textView }
+        for subview in subviews {
+            if let found = subview.firstDescendantTextView() { return found }
+        }
+        return nil
     }
 }
 

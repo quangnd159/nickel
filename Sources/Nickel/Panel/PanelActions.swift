@@ -184,7 +184,14 @@ final class PanelActions: ObservableObject {
     /// Right-clicking a note that isn't already selected selects only it,
     /// leaving an existing multi-selection intact if the clicked note is
     /// already part of it.
+    ///
+    /// Also resigns text focus (composer/search field), matching the
+    /// single-click case — unless this is a right-click on the note already
+    /// mid-inline-edit, which shouldn't yank focus out of its own field.
     func selectOnRightClick(_ id: UUID) {
+        if selection.editingID != id {
+            NSApp.keyWindow?.makeFirstResponder(nil)
+        }
         if !selection.selectedIDs.contains(id) {
             selection.selectSingle(id)
         }
