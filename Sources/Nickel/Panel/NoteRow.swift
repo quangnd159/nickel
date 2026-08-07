@@ -74,11 +74,23 @@ struct NoteRow: View {
             .accessibilityHidden(true)
             .reportingCheckboxFrame(in: Self.attachmentsSpace)
 
+            // `.identity` on both branches: the editor and the display text
+            // render pixel-identically (same font, spacing, wrap width —
+            // snapshot-verified), so the swap must be an instantaneous
+            // replacement with the spring animating only the row's height.
+            // The default opacity cross-fade reads as a one-frame text
+            // flash on edit exit, because the AppKit-backed editor's layer
+            // teardown doesn't fade in step with the SwiftUI `Text` fading
+            // in. (Space expand/collapse swaps two SwiftUI `Text`s, whose
+            // matched cross-fade is imperceptible — the asymmetry that made
+            // the flash stand out.)
             Group {
                 if isEditing {
                     editField
+                        .transition(.identity)
                 } else {
                     displayText
+                        .transition(.identity)
                 }
             }
         }
