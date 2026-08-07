@@ -463,9 +463,7 @@ struct PanelView: View {
     /// Gentle spring used for note insert/delete/move and section
     /// appearance, keyed off the flat visible order so any change to which
     /// notes are shown (or in what order) animates.
-    private var rowSpring: Animation {
-        .spring(response: 0.3, dampingFraction: 0.8)
-    }
+    private var rowSpring: Animation { .noteRowSpring }
 
     private var rowTransition: AnyTransition {
         .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
@@ -1027,4 +1025,12 @@ struct PanelView: View {
         let name = rest.trimmingCharacters(in: .whitespaces)
         return .some(name.isEmpty ? nil : name)
     }
+}
+
+/// The note list's one shared row motion. Everything that reflows rows —
+/// insert/delete/move, expand/collapse, section changes, and ending an
+/// inline edit (`SelectionModel.endEditing`) — uses this same spring so the
+/// list moves as one system.
+extension Animation {
+    static let noteRowSpring = Animation.spring(response: 0.3, dampingFraction: 0.8)
 }

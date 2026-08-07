@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import SwiftUI
 
 /// A panel-wide modal overlay: the ⌘K section palette or the ⌘/ keyboard
 /// shortcuts card. At most one is presented at a time.
@@ -265,8 +266,15 @@ final class SelectionModel: ObservableObject {
     }
 
     func endEditing() {
-        editingID = nil
-        editingText = ""
+        // Ending an edit collapses the row back to its preview and reflows
+        // everything below; the list's shared spring keeps that motion
+        // trackable. Beginning an edit deliberately stays instant — the
+        // editor must be typeable immediately, and the caret reveal
+        // measures final layout, which an in-flight animation would break.
+        withAnimation(.noteRowSpring) {
+            editingID = nil
+            editingText = ""
+        }
     }
 
     // MARK: - Section rename
