@@ -407,24 +407,23 @@ struct NoteRow: View {
 
 // MARK: - Inline editor text surface
 
-/// The inline note editor's text surface: a borderless, auto-growing
-/// `NSTextField` (the same `GrowingTextField` the composer uses in
-/// `ComposerField`) rather than SwiftUI's `TextField(axis: .vertical)`.
+/// The inline note editor's text surface: a borderless, self-sizing
+/// `NSTextView`, the same control the ⌘↩ window editor uses
+/// (`NoteSourceTextView`), rather than SwiftUI's `TextField(axis: .vertical)`
+/// or an `NSTextField`.
 ///
-/// Two things that field can't do on macOS drove the switch. First, Shift
-/// and plain Return need different behavior (newline vs. commit), but
-/// `TextField(axis: .vertical)`'s default Return handling only calls
-/// `onSubmit` for single-line fields — there's no default newline binding to
-/// key off of, and no `doCommandBy:` hook to reach without dropping to
-/// AppKit. Second, editing should start with the caret at the end of the
-/// text, not the field's default select-all.
+/// `TextField` can't give Shift-Return and plain Return different behavior
+/// (newline vs. commit) and always starts editing with everything selected.
+/// An `NSTextField` was tried next and can't hold a paragraph style: the
+/// cell reasserts its own plain attributes over the field editor, so the
+/// display view's 2pt line spacing was silently dropped (verified by
+/// snapshot — storage carried lineSpacing 2, the rendered text and the
+/// cell's measured height didn't). Multiline editing with paragraph styles
+/// is what `NSTextView` is for.
 private struct InlineNoteEditorField: NSViewRepresentable {
     /// Matches `displayText`'s `.lineSpacing(2)`, so entering edit mode
-    /// doesn't visibly tighten multiline notes (in-place editing shouldn't
-    /// reflow the text it replaces). Applied to the field's initial
-    /// attributed value (so `GrowingTextField`'s cell-based height
-    /// measurement agrees from the first frame) and to the field editor in
-    /// `configureFieldEditor`.
+    /// doesn't visibly reflow the text it replaces (in-place editing keeps
+    /// the display metrics).
     private static let paragraphStyle: NSParagraphStyle = {
         let style = NSMutableParagraphStyle()
         style.lineSpacing = 2
@@ -439,7 +438,7 @@ private struct InlineNoteEditorField: NSViewRepresentable {
     ]
 
     @Binding var text: String
-    /// Mirrors the field's first-responder state, the same pattern
+    /// Mirrors the view's first-responder state, the same pattern
     /// `ComposerField` uses, so `NoteRow` can commit on focus loss.
     @Binding var isFocused: Bool
     /// Called when plain Return is pressed.
@@ -447,85 +446,79 @@ private struct InlineNoteEditorField: NSViewRepresentable {
     /// Called when Escape is pressed.
     var onCancel: () -> Void
 
-    func makeNSView(context: Context) -> GrowingTextField {
-        let field = GrowingTextField()
-        field.delegate = context.coordinator
-        field.isBordered = false
-        field.drawsBackground = false
-        field.focusRingType = .none
-        field.font = .systemFont(ofSize: 14)
-        field.usesSingleLineMode = false
-        field.cell?.wraps = true
-        field.cell?.isScrollable = false
-        field.lineBreakMode = .byWordWrapping
-        field.attributedStringValue = NSAttributedString(string: text, attributes: Self.textAttributes)
-        field.onFocusChange = { [weak coordinator = context.coordinator] focused in
+    func makeNSView(context: Context) -> InlineNoteTextView {
+        let view = InlineNoteTextView()
+        view.delegate = context.coordinator
+        view.isRichText = false
+        view.allowsUndo = true
+        view.drawsBackground = false
+        view.focusRingType = .none
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = true
+        // Not `isVerticallyResizable`: that's the in-a-scroll-view sizing
+        // model and lets the view balloon toward `maxSize`; here SwiftUI
+        // sizes the view from `intrinsicContentSize` alone. The container
+        // keeps an unbounded height so layout never clips while the frame
+        // catches up.
+        view.isVerticallyResizable = false
+        view.isHorizontallyResizable = false
+        view.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        // NSTextView's default vertical hugging is low (an NSTextField's is
+        // high), so SwiftUI would stretch the view to the proposed height
+        // instead of holding it at `intrinsicContentSize`.
+        view.setContentHuggingPriority(.required, for: .vertical)
+        view.setContentCompressionResistancePriority(.required, for: .vertical)
+        view.font = .systemFont(ofSize: 14)
+        view.textColor = .labelColor
+        view.defaultParagraphStyle = Self.paragraphStyle
+        view.typingAttributes = Self.textAttributes
+        view.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: Self.textAttributes))
+        view.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.isFocused.wrappedValue = focused
         }
 
-        // Editing always starts on a freshly created field — `NoteRow`
-        // swaps this view in for `displayText` from scratch when it enters
-        // edit mode — so this is the one moment to claim first responder and
-        // park the caret at the end. Deferred a runloop turn, same as
-        // `HeaderRenameField`: a field created mid-layout-pass can have
+        // Editing always starts on a freshly created view — `NoteRow` swaps
+        // this in for `displayText` from scratch when it enters edit mode —
+        // so this is the one moment to claim first responder and park the
+        // caret at the end. Deferred a runloop turn, same as
+        // `HeaderRenameField`: a view created mid-layout-pass can have
         // `makeFirstResponder` silently no-op.
-        DispatchQueue.main.async {
-            field.window?.makeFirstResponder(field)
-            if field.currentEditor() != nil {
-                Self.configureFieldEditor(of: field)
-            } else {
-                DispatchQueue.main.async {
-                    field.window?.makeFirstResponder(field)
-                    Self.configureFieldEditor(of: field)
-                }
+        DispatchQueue.main.async { [weak view] in
+            guard let view else { return }
+            view.window?.makeFirstResponder(view)
+            view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+            // Reveal the caret, the standard focus behavior. The enclosing
+            // scroll view is the panel's note list (SwiftUI's `ScrollView`
+            // is `NSScrollView`-backed), so this scrolls the list to the end
+            // of a note taller than the preview it replaced. Deferred one
+            // more turn *and* forced through `layoutIfNeeded`: the row's
+            // grown height propagates through SwiftUI layout asynchronously,
+            // and scrolling before it lands measures the caret against a
+            // stale frame (seen as the reveal stopping a line short).
+            DispatchQueue.main.async { [weak view] in
+                guard let view else { return }
+                view.window?.layoutIfNeeded()
+                view.scrollRangeToVisible(view.selectedRange())
+                // `scrollRangeToVisible` stops exactly at the caret's line,
+                // which leaves the card's bottom chrome below it (the row's
+                // 13pt vertical padding plus the 2pt selection stroke)
+                // clipped when editing begins at the end of a note near the
+                // viewport bottom. Also reveal that strip; a no-op when
+                // it's already on screen.
+                let bottomChrome: CGFloat = 15
+                view.scrollToVisible(NSRect(
+                    x: 0, y: view.bounds.maxY,
+                    width: view.bounds.width, height: bottomChrome
+                ))
             }
         }
-        return field
+        return view
     }
 
-    /// Parks the caret at the end and carries the display line spacing over
-    /// into the live field editor: its existing text, its typing attributes
-    /// (so newly typed runs match), and its default paragraph style.
-    private static func configureFieldEditor(of field: GrowingTextField) {
-        guard let editor = field.currentEditor() as? NSTextView else { return }
-        editor.moveToEndOfDocument(nil)
-        editor.defaultParagraphStyle = paragraphStyle
-        var typing = editor.typingAttributes
-        typing[.paragraphStyle] = paragraphStyle
-        editor.typingAttributes = typing
-        if let storage = editor.textStorage, storage.length > 0 {
-            storage.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: storage.length))
-        }
-        field.syncIntrinsicSizeWithEditor()
-        // Reveal the caret, the standard focus behavior. The field editor's
-        // enclosing scroll view is the panel's note list (SwiftUI's
-        // `ScrollView` is `NSScrollView`-backed), so this scrolls the list
-        // to the end of a note taller than the preview it replaced. Deferred
-        // a turn *and* forced through `layoutIfNeeded`: the row's grown
-        // height propagates through SwiftUI layout asynchronously, and
-        // scrolling before it lands measures the caret against a stale
-        // frame (which showed up as the reveal stopping a line short).
-        DispatchQueue.main.async { [weak editor, weak field] in
-            guard let editor, let field else { return }
-            field.window?.layoutIfNeeded()
-            editor.scrollRangeToVisible(editor.selectedRange())
-            // `scrollRangeToVisible` stops exactly at the caret's line,
-            // which leaves the card's bottom chrome below it (the row's
-            // 13pt vertical padding plus the 2pt selection stroke) clipped
-            // when editing begins at the end of a note near the viewport
-            // bottom. Also reveal that strip; a no-op when it's already
-            // on screen.
-            let bottomChrome: CGFloat = 15
-            field.scrollToVisible(NSRect(
-                x: 0, y: field.bounds.maxY,
-                width: field.bounds.width, height: bottomChrome
-            ))
-        }
-    }
-
-    func updateNSView(_ nsView: GrowingTextField, context: Context) {
-        if nsView.stringValue != text {
-            nsView.attributedStringValue = NSAttributedString(string: text, attributes: Self.textAttributes)
+    func updateNSView(_ nsView: InlineNoteTextView, context: Context) {
+        if nsView.string != text {
+            nsView.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: Self.textAttributes))
             nsView.invalidateIntrinsicContentSize()
         }
         context.coordinator.onCommit = onCommit
@@ -536,7 +529,7 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         Coordinator(text: $text, onCommit: onCommit, onCancel: onCancel, isFocused: $isFocused)
     }
 
-    final class Coordinator: NSObject, NSTextFieldDelegate {
+    final class Coordinator: NSObject, NSTextViewDelegate {
         private let text: Binding<String>
         var onCommit: () -> Void
         private let onCancel: () -> Void
@@ -549,19 +542,17 @@ private struct InlineNoteEditorField: NSViewRepresentable {
             self.isFocused = isFocused
         }
 
-        func controlTextDidChange(_ notification: Notification) {
-            guard let field = notification.object as? GrowingTextField else { return }
-            text.wrappedValue = field.stringValue
-            field.syncIntrinsicSizeWithEditor()
+        func textDidChange(_ notification: Notification) {
+            guard let view = notification.object as? NSTextView else { return }
+            text.wrappedValue = view.string
         }
 
-        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-                if NSEvent.modifierFlags.contains(.shift) {
-                    textView.insertNewlineIgnoringFieldEditor(nil)
-                } else {
-                    onCommit()
-                }
+                // Shift+Return: fall through to the default newline
+                // insertion. Plain Return commits.
+                if NSEvent.modifierFlags.contains(.shift) { return false }
+                onCommit()
                 return true
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
@@ -570,6 +561,49 @@ private struct InlineNoteEditorField: NSViewRepresentable {
             }
             return false
         }
+    }
+}
+
+/// A non-scrolling `NSTextView` whose intrinsic height is its laid-out text
+/// height, so the row grows and shrinks with the content the way
+/// `GrowingTextField` does for the composer.
+private final class InlineNoteTextView: NSTextView {
+    /// Same asymmetric contract as `GrowingTextField.onFocusChange`; here
+    /// both hooks are real overrides since an `NSTextView` is its own
+    /// editor (no field-editor handoff).
+    var onFocusChange: ((Bool) -> Void)?
+
+    override var intrinsicContentSize: NSSize {
+        guard let layoutManager, let textContainer else { return super.intrinsicContentSize }
+        layoutManager.ensureLayout(for: textContainer)
+        return NSSize(
+            width: NSView.noIntrinsicMetric,
+            height: ceil(layoutManager.usedRect(for: textContainer).height)
+        )
+    }
+
+    override func didChangeText() {
+        super.didChangeText()
+        invalidateIntrinsicContentSize()
+    }
+
+    /// A width change rewraps the text, so the height must be remeasured.
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        if widthChanged { invalidateIntrinsicContentSize() }
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        let didBecome = super.becomeFirstResponder()
+        if didBecome { onFocusChange?(true) }
+        return didBecome
+    }
+
+    override func resignFirstResponder() -> Bool {
+        let didResign = super.resignFirstResponder()
+        if didResign { onFocusChange?(false) }
+        return didResign
     }
 }
 
