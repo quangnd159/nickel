@@ -572,13 +572,26 @@ private struct InlineNoteEditorField: NSViewRepresentable {
                 // insertion. Plain Return commits.
                 if NSEvent.modifierFlags.contains(.shift) { return false }
                 onCommit()
+                endFocus(of: textView)
                 return true
             }
             if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
                 onCancel()
+                endFocus(of: textView)
                 return true
             }
             return false
+        }
+
+        /// Resigns first responder *after* the edit has ended. The editor
+        /// stays on screen for the collapse animation, and while it remains
+        /// first responder it keeps drawing its insertion point — which
+        /// sweeps along the left margin as the shrinking frame rewraps the
+        /// text (snapshot-confirmed). Ordered after `onCommit`/`onCancel` so
+        /// the focus-loss commit path sees editing already over and stays a
+        /// no-op (Escape must discard, not commit).
+        private func endFocus(of textView: NSTextView) {
+            textView.window?.makeFirstResponder(nil)
         }
     }
 }
