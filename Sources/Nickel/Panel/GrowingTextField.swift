@@ -39,12 +39,28 @@ class GrowingTextField: NSTextField {
 
     override var intrinsicContentSize: NSSize {
         guard let cell, preferredMaxLayoutWidth > 0 else { return super.intrinsicContentSize }
-        let size = cell.cellSize(forBounds: NSRect(
+        let cellHeight = cell.cellSize(forBounds: NSRect(
             x: 0, y: 0,
             width: preferredMaxLayoutWidth,
             height: .greatestFiniteMagnitude
-        ))
-        return NSSize(width: NSView.noIntrinsicMetric, height: size.height)
+        )).height
+        // `cellSize(forBounds:)` wraps against the cell's title rect, which
+        // is inset a few points narrower than the field itself, so wrapped
+        // text routinely measures a phantom line taller than it actually
+        // renders (68pt for a 3-line string that lays out at 51pt) — the
+        // extra height showed up as blank space under the last line.
+        // `boundingRect` at the real wrap width matches what's rendered.
+        // `cellSize` remains as the cap — it's what honors
+        // `maximumNumberOfLines` — and as the empty-string height (a
+        // zero-height measurement would collapse the field entirely).
+        guard attributedStringValue.length > 0 else {
+            return NSSize(width: NSView.noIntrinsicMetric, height: cellHeight)
+        }
+        let textHeight = attributedStringValue.boundingRect(
+            with: NSSize(width: preferredMaxLayoutWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin]
+        ).height
+        return NSSize(width: NSView.noIntrinsicMetric, height: min(ceil(textHeight), cellHeight))
     }
 
     /// Re-syncs the cell's `attributedStringValue` from the field editor's
