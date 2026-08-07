@@ -501,10 +501,13 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         // enclosing scroll view is the panel's note list (SwiftUI's
         // `ScrollView` is `NSScrollView`-backed), so this scrolls the list
         // to the end of a note taller than the preview it replaced. Deferred
-        // a turn: the row's grown height has to be laid out first, or the
-        // caret rect is measured against the stale 3-line-preview frame.
-        DispatchQueue.main.async { [weak editor] in
+        // a turn *and* forced through `layoutIfNeeded`: the row's grown
+        // height propagates through SwiftUI layout asynchronously, and
+        // scrolling before it lands measures the caret against a stale
+        // frame (which showed up as the reveal stopping a line short).
+        DispatchQueue.main.async { [weak editor, weak field] in
             guard let editor else { return }
+            field?.window?.layoutIfNeeded()
             editor.scrollRangeToVisible(editor.selectedRange())
         }
     }

@@ -76,9 +76,10 @@ final class SelectionModel: ObservableObject {
     /// to an empty string before a separate sync pass fills it in).
     @Published var renameText: String = ""
 
-    /// Set only by keyboard navigation (`moveSelection`), never by clicks or
-    /// select-all, so `PanelView` can scroll the new lead row into view the
-    /// way `NSTableView.scrollRowToVisible` would — and only in that case.
+    /// Set only by keyboard navigation (`moveSelection`) and by expansion
+    /// (`toggleExpanded`), never by clicks or select-all, so `PanelView` can
+    /// scroll the affected row into view the way `NSTableView` keyboard nav
+    /// and Finder's expand-a-folder disclosure would — and only then.
     @Published private(set) var revealRequest: RevealRequest?
 
     /// The last note explicitly clicked or navigated to; the anchor for
@@ -294,6 +295,13 @@ final class SelectionModel: ObservableObject {
             expandedIDs.subtract(ids)
         } else {
             expandedIDs.formUnion(ids)
+            // Expansion grows the row downward, so a note near the viewport
+            // bottom would disclose its content off-screen; reveal it the
+            // way Finder's outline view reveals newly disclosed children.
+            // Collapse needs no reveal — the row only shrinks.
+            if let target = leadID.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first {
+                revealRequest = RevealRequest(id: target)
+            }
         }
     }
 
