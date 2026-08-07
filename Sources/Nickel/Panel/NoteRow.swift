@@ -121,6 +121,11 @@ struct NoteRow: View {
             SpatialTapGesture(count: 1).onEnded { value in handleClick(at: value.location) }
         )
         .contextMenu { contextMenuContent }
+        .onGeometryChange(for: CGRect.self) { proxy in
+            proxy.frame(in: .named(SelectionModel.viewportSpaceName))
+        } action: { frame in
+            selection.rowViewportFrames[note.id] = frame
+        }
     }
 
     // MARK: - Editing / display subviews
@@ -488,24 +493,21 @@ private struct InlineNoteEditorField: NSViewRepresentable {
             guard let view else { return }
             view.window?.makeFirstResponder(view)
             view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
-            // Reveal the caret, the standard focus behavior. The enclosing
-            // scroll view is the panel's note list (SwiftUI's `ScrollView`
-            // is `NSScrollView`-backed), so this scrolls the list to the end
-            // of a note taller than the preview it replaced. Deferred one
-            // more turn *and* forced through `layoutIfNeeded`: the row's
-            // grown height propagates through SwiftUI layout asynchronously,
-            // and scrolling before it lands measures the caret against a
-            // stale frame (seen as the reveal stopping a line short).
-            DispatchQueue.main.async { [weak view] in
-                guard let view else { return }
+            // The reveal itself is coordinated by `PanelView`: entering an
+            // edit that would grow past the viewport issues an animated
+            // `scrollTo(_, anchor: .bottom)` in the same spring as the
+            // row's growth (an AppKit-level scroll here would be overridden
+            // — SwiftUI's `ScrollView` owns its offset while its layout is
+            // animating). This deferred pass is only a correctness
+            // backstop, after the spring has settled: a no-op when the
+            // coordinated scroll landed, a small correction if the height
+            // estimate it used was off. It reveals the caret plus the
+            // card's bottom chrome (13pt padding + 2pt stroke) that
+            // `scrollRangeToVisible` alone stops short of.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak view] in
+                guard let view, view.window != nil else { return }
                 view.window?.layoutIfNeeded()
                 view.scrollRangeToVisible(view.selectedRange())
-                // `scrollRangeToVisible` stops exactly at the caret's line,
-                // which leaves the card's bottom chrome below it (the row's
-                // 13pt vertical padding plus the 2pt selection stroke)
-                // clipped when editing begins at the end of a note near the
-                // viewport bottom. Also reveal that strip; a no-op when
-                // it's already on screen.
                 let bottomChrome: CGFloat = 15
                 view.scrollToVisible(NSRect(
                     x: 0, y: view.bounds.maxY,
@@ -523,6 +525,23 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         }
         context.coordinator.onCommit = onCommit
         context.coordinator.isFocused = $isFocused
+    }
+
+    /// Answers SwiftUI's size proposal synchronously — measuring the text at
+    /// the proposed width — instead of leaving height to
+    /// `intrinsicContentSize`, which is only correct one layout pass later
+    /// (the container width isn't known at creation). Same-pass sizing is
+    /// what lets `SelectionModel.beginEditing`'s spring interpolate the
+    /// row's growth; the deferred intrinsic path landed outside the animated
+    /// transaction and snapped.
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: InlineNoteTextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        let measured = NSAttributedString(string: nsView.string, attributes: Self.textAttributes)
+            .boundingRect(
+                with: NSSize(width: width, height: CGFloat.greatestFiniteMagnitude),
+                options: [.usesLineFragmentOrigin]
+            ).height
+        return CGSize(width: width, height: max(ceil(measured), NSFont.systemFont(ofSize: 14).pointSize))
     }
 
     func makeCoordinator() -> Coordinator {

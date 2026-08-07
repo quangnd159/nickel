@@ -429,6 +429,7 @@ struct PanelView: View {
                         .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .coordinateSpace(name: SelectionModel.viewportSpaceName)
                     // Keyboard navigation (arrow keys) keeps the lead row
                     // visible, matching `NSTableView.scrollRowToVisible`: no
                     // anchor (scrolls the minimal distance to the nearest
@@ -438,6 +439,33 @@ struct PanelView: View {
                     .onChange(of: selection.revealRequest) { _, request in
                         guard let request else { return }
                         scrollProxy.scrollTo(request.id)
+                    }
+                    // Entering an edit grows the row to its full text (the
+                    // preview is clamped to 3 lines); when that growth would
+                    // run past the viewport bottom, scroll in the same
+                    // spring the growth animates with, so the card opens and
+                    // the list glides in one coordinated motion with the
+                    // caret's end-of-note position landing on screen. Rows
+                    // that still fit don't scroll at all. Height is
+                    // estimated from the note's text (`editedRowHeight`);
+                    // the editor's own deferred reveal backstops any
+                    // estimate error.
+                    .onChange(of: selection.editingID) { _, editingID in
+                        guard let editingID,
+                              let note = store.notes.first(where: { $0.id == editingID }),
+                              let rowFrame = selection.rowViewportFrames[editingID] else { return }
+                        let finalBottom = rowFrame.minY + editedRowHeight(text: note.text, rowWidth: rowFrame.width)
+                        guard finalBottom > geometry.size.height else { return }
+                        // Deferred a turn: issued directly in `onChange`,
+                        // `scrollTo` computes its target from the row's
+                        // pre-growth layout and lands short. One turn later
+                        // the layout is final, and the scroll's spring still
+                        // overlaps the growth's almost entirely.
+                        DispatchQueue.main.async {
+                            withAnimation(.noteRowSpring) {
+                                scrollProxy.scrollTo(editingID, anchor: .bottom)
+                            }
+                        }
                     }
                 }
             }
@@ -464,6 +492,27 @@ struct PanelView: View {
     /// appearance, keyed off the flat visible order so any change to which
     /// notes are shown (or in what order) animates.
     private var rowSpring: Animation { .noteRowSpring }
+
+    /// Estimated on-screen height of `text`'s row once inline editing shows
+    /// the full text: the text measured at the row's content width (row
+    /// minus 14pt horizontal padding each side, the 19pt checkbox, and its
+    /// 12pt gap) plus the 13pt vertical padding each side. Matches the
+    /// editor's own metrics (`InlineNoteEditorField.textAttributes`); used
+    /// only to decide whether entering the edit needs a coordinated scroll,
+    /// so small error is fine — the editor's deferred reveal corrects it.
+    private func editedRowHeight(text: String, rowWidth: CGFloat) -> CGFloat {
+        let textWidth = max(rowWidth - 28 - 19 - 12, 50)
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 2
+        let textHeight = NSAttributedString(string: text, attributes: [
+            .font: NSFont.systemFont(ofSize: 14),
+            .paragraphStyle: style,
+        ]).boundingRect(
+            with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin]
+        ).height
+        return ceil(textHeight) + 26
+    }
 
     private var rowTransition: AnyTransition {
         .opacity.combined(with: .scale(scale: 0.96, anchor: .top))

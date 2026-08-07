@@ -83,6 +83,17 @@ final class SelectionModel: ObservableObject {
     /// and Finder's expand-a-folder disclosure would — and only then.
     @Published private(set) var revealRequest: RevealRequest?
 
+    /// Name of the coordinate space `PanelView` attaches to the note list's
+    /// scroll viewport, so rows can report viewport-relative frames.
+    static let viewportSpaceName = "noteListViewport"
+
+    /// Each visible row's current frame in the viewport coordinate space,
+    /// kept up to date by `NoteRow`. Deliberately not `@Published` — frames
+    /// change on every scroll tick and nothing renders from them; they're
+    /// read on demand (e.g. deciding whether entering an edit needs a
+    /// coordinated scroll).
+    var rowViewportFrames: [UUID: CGRect] = [:]
+
     /// The last note explicitly clicked or navigated to; the anchor for
     /// shift-click and shift-arrow range selection.
     private var anchorID: UUID?
@@ -261,8 +272,13 @@ final class SelectionModel: ObservableObject {
     // MARK: - Inline editing
 
     func beginEditing(id: UUID, text: String) {
-        editingID = id
-        editingText = text
+        // Same spring as `endEditing`, so opening into edit and collapsing
+        // back out are one continuous motion (the editor keeps the caret
+        // revealed while the row grows — see `InlineNoteEditorField`).
+        withAnimation(.noteRowSpring) {
+            editingID = id
+            editingText = text
+        }
     }
 
     func endEditing() {
