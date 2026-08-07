@@ -104,23 +104,21 @@ struct NoteRow: View {
         .onPreferenceChange(CheckboxFramePreferenceKey.self) { checkboxFrame = $0 }
         .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
         // Row-wide click target: clicking anywhere on the card (including its
-        // padding) selects it. `simultaneousGesture` (rather than a plain,
-        // exclusive `onTapGesture`) makes the single-click recognizer fire
-        // immediately on mouse-up instead of waiting out the double-click
-        // window for the count:2 recognizer to fail — that wait is what made
-        // click-to-select feel slow. Because simultaneous gestures don't
-        // exclude the checkbox `Button`'s own tap handling, both handlers
-        // explicitly ignore hits that land in the checkbox column (see
-        // `isInCheckboxColumn`, which hit-tests against the checkbox's
-        // measured frame rather than a hand-summed constant) so the checkbox
-        // stays selection-inert (a pure work-tracking control,
-        // Copper/Reminders/Things-style).
+        // padding) selects it. One count:1 recognizer handles both clicks:
+        // it fires on every mouse-up (so click-to-select is immediate, no
+        // double-click-window wait), and the second click of a double-click
+        // is told apart by `NSEvent.clickCount` — a simultaneous count:2
+        // `SpatialTapGesture` never fires once a count:1 recognizer has
+        // already succeeded on the same view. `simultaneousGesture` (rather
+        // than `onTapGesture`) so the checkbox `Button`'s own tap handling
+        // isn't excluded; the handlers instead explicitly ignore hits that
+        // land in the checkbox column (see `isInCheckboxColumn`, which
+        // hit-tests against the checkbox's measured frame rather than a
+        // hand-summed constant) so the checkbox stays selection-inert (a
+        // pure work-tracking control, Copper/Reminders/Things-style).
         .contentShape(Rectangle())
         .simultaneousGesture(
-            SpatialTapGesture(count: 1).onEnded { value in handleSingleClick(at: value.location) }
-        )
-        .simultaneousGesture(
-            SpatialTapGesture(count: 2).onEnded { value in handleDoubleClick(at: value.location) }
+            SpatialTapGesture(count: 1).onEnded { value in handleClick(at: value.location) }
         )
         .contextMenu { contextMenuContent }
     }
@@ -269,6 +267,17 @@ struct NoteRow: View {
         location.x < checkboxFrame.maxX + Self.checkboxContentSpacing / 2
     }
 
+    /// Dispatches on `NSEvent.clickCount` (see the gesture comment in
+    /// `body`): the second mouse-up of a double-click re-enters here with
+    /// `clickCount == 2` after the first was already handled as a single.
+    private func handleClick(at location: CGPoint) {
+        if NSApp.currentEvent?.clickCount == 2 {
+            handleDoubleClick(at: location)
+        } else {
+            handleSingleClick(at: location)
+        }
+    }
+
     private func handleSingleClick(at location: CGPoint) {
         guard !isInCheckboxColumn(location) else { return }
         // Clicking another row while this one is mid-edit steals focus,
@@ -410,6 +419,25 @@ struct NoteRow: View {
 /// AppKit. Second, editing should start with the caret at the end of the
 /// text, not the field's default select-all.
 private struct InlineNoteEditorField: NSViewRepresentable {
+    /// Matches `displayText`'s `.lineSpacing(2)`, so entering edit mode
+    /// doesn't visibly tighten multiline notes (in-place editing shouldn't
+    /// reflow the text it replaces). Applied to the field's initial
+    /// attributed value (so `GrowingTextField`'s cell-based height
+    /// measurement agrees from the first frame) and to the field editor in
+    /// `configureFieldEditor`.
+    private static let paragraphStyle: NSParagraphStyle = {
+        let style = NSMutableParagraphStyle()
+        style.lineSpacing = 2
+        style.lineBreakMode = .byWordWrapping
+        return style
+    }()
+
+    private static let textAttributes: [NSAttributedString.Key: Any] = [
+        .font: NSFont.systemFont(ofSize: 14),
+        .foregroundColor: NSColor.labelColor,
+        .paragraphStyle: paragraphStyle,
+    ]
+
     @Binding var text: String
     /// Mirrors the field's first-responder state, the same pattern
     /// `ComposerField` uses, so `NoteRow` can commit on focus loss.
@@ -430,7 +458,7 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         field.cell?.wraps = true
         field.cell?.isScrollable = false
         field.lineBreakMode = .byWordWrapping
-        field.stringValue = text
+        field.attributedStringValue = NSAttributedString(string: text, attributes: Self.textAttributes)
         field.onFocusChange = { [weak coordinator = context.coordinator] focused in
             coordinator?.isFocused.wrappedValue = focused
         }
@@ -443,21 +471,37 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         // `makeFirstResponder` silently no-op.
         DispatchQueue.main.async {
             field.window?.makeFirstResponder(field)
-            if let editor = field.currentEditor() {
-                editor.moveToEndOfDocument(nil)
+            if field.currentEditor() != nil {
+                Self.configureFieldEditor(of: field)
             } else {
                 DispatchQueue.main.async {
                     field.window?.makeFirstResponder(field)
-                    field.currentEditor()?.moveToEndOfDocument(nil)
+                    Self.configureFieldEditor(of: field)
                 }
             }
         }
         return field
     }
 
+    /// Parks the caret at the end and carries the display line spacing over
+    /// into the live field editor: its existing text, its typing attributes
+    /// (so newly typed runs match), and its default paragraph style.
+    private static func configureFieldEditor(of field: GrowingTextField) {
+        guard let editor = field.currentEditor() as? NSTextView else { return }
+        editor.moveToEndOfDocument(nil)
+        editor.defaultParagraphStyle = paragraphStyle
+        var typing = editor.typingAttributes
+        typing[.paragraphStyle] = paragraphStyle
+        editor.typingAttributes = typing
+        if let storage = editor.textStorage, storage.length > 0 {
+            storage.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: storage.length))
+        }
+        field.syncIntrinsicSizeWithEditor()
+    }
+
     func updateNSView(_ nsView: GrowingTextField, context: Context) {
         if nsView.stringValue != text {
-            nsView.stringValue = text
+            nsView.attributedStringValue = NSAttributedString(string: text, attributes: Self.textAttributes)
             nsView.invalidateIntrinsicContentSize()
         }
         context.coordinator.onCommit = onCommit
