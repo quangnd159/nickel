@@ -497,6 +497,16 @@ private struct InlineNoteEditorField: NSViewRepresentable {
             storage.addAttribute(.paragraphStyle, value: paragraphStyle, range: NSRange(location: 0, length: storage.length))
         }
         field.syncIntrinsicSizeWithEditor()
+        // Reveal the caret, the standard focus behavior. The field editor's
+        // enclosing scroll view is the panel's note list (SwiftUI's
+        // `ScrollView` is `NSScrollView`-backed), so this scrolls the list
+        // to the end of a note taller than the preview it replaced. Deferred
+        // a turn: the row's grown height has to be laid out first, or the
+        // caret rect is measured against the stale 3-line-preview frame.
+        DispatchQueue.main.async { [weak editor] in
+            guard let editor else { return }
+            editor.scrollRangeToVisible(editor.selectedRange())
+        }
     }
 
     func updateNSView(_ nsView: GrowingTextField, context: Context) {
