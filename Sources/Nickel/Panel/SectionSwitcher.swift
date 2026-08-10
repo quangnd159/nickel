@@ -21,7 +21,8 @@ extension Notification.Name {
 ///
 /// - **Switch** (`move == false`): search-and-switch across "Show All",
 ///   every section, and (for a query that doesn't already match one)
-///   creating a new section.
+///   creating a new section — followed, under a hairline, by the commands
+///   that apply right now (`PaletteCommand`).
 /// - **Move** (`move == true`): search-and-move the current selection into a
 ///   section — every matching section, plus "No Section" (ungroup), plus the
 ///   same "New Section" row — without touching `store.activeSection` or the
@@ -86,13 +87,29 @@ struct SectionSwitcher: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(results.enumerated()), id: \.element.id) { index, result in
-                            resultRow(result, isHighlighted: index == highlightedIndex)
-                                .onTapGesture { commit(result) }
-                                .onHover { isHovering in
-                                    if isHovering { highlightedIndex = index }
+                        let rows = results
+                        let firstCommandIndex = rows.firstIndex { $0.isCommand }
+                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, result in
+                            VStack(alignment: .leading, spacing: 2) {
+                                // One hairline between the destinations and
+                                // the commands below them (never at the very
+                                // top, where there'd be nothing above it to
+                                // separate).
+                                if index == firstCommandIndex, index > 0 {
+                                    Rectangle()
+                                        .fill(.quaternary)
+                                        .frame(height: 1)
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 3)
                                 }
-                                .id(result.id)
+
+                                resultRow(result, isHighlighted: index == highlightedIndex)
+                                    .onTapGesture { commit(result) }
+                                    .onHover { isHovering in
+                                        if isHovering { highlightedIndex = index }
+                                    }
+                            }
+                            .id(result.id)
                         }
                     }
                     .padding(6)
@@ -118,6 +135,16 @@ struct SectionSwitcher: View {
         let usesAccentFill = isHighlighted && isEmphasized
 
         return HStack(spacing: 8) {
+            // Commands carry a small symbol; destinations don't. That, plus
+            // the hairline above the first command, is the whole distinction
+            // — no color, no badge.
+            if case .command(let command) = result {
+                Image(systemName: command.symbolName)
+                    .font(.system(size: 11))
+                    .foregroundStyle(usesAccentFill ? Color.white : Color.secondary)
+                    .frame(width: 14)
+            }
+
             Text(label(for: result))
                 .font(.system(size: 13))
                 .foregroundStyle(usesAccentFill ? Color.white : Color.primary)
@@ -158,6 +185,7 @@ struct SectionSwitcher: View {
         case section(String)
         case noSection
         case newSection(String)
+        case command(PaletteCommand)
 
         var id: String {
             switch self {
@@ -165,8 +193,16 @@ struct SectionSwitcher: View {
             case .section(let name): return "section:\(name)"
             case .noSection: return "no-section"
             case .newSection(let name): return "new:\(name)"
+            case .command(let command): return "command:\(command.title)"
             }
         }
+
+        var isCommand: Bool {
+            if case .command = self { return true }
+            return false
+        }
+
+        var group: PaletteGroup { isCommand ? .command : .section }
     }
 
     /// Switch mode: "Show All" (if it matches), then every matching section,
@@ -178,25 +214,44 @@ struct SectionSwitcher: View {
     /// move notes into.
     private var results: [Result] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        var items: [Result] = []
 
-        if move {
-            if trimmedQuery.isEmpty || "No Section".localizedCaseInsensitiveContains(trimmedQuery) {
-                items.append(.noSection)
-            }
-        } else if trimmedQuery.isEmpty || "Show All".localizedCaseInsensitiveContains(trimmedQuery) {
-            items.append(.showAll)
-        }
+        var candidates: [Result] = [move ? .noSection : .showAll]
+        candidates += store.sections.map { .section($0) }
+        candidates += PaletteCommand.applicable(in: paletteContext).map { .command($0) }
 
-        for sectionName in store.sections where trimmedQuery.isEmpty || sectionName.localizedCaseInsensitiveContains(trimmedQuery) {
-            items.append(.section(sectionName))
-        }
+        var items = PaletteMatcher.ranked(
+            candidates,
+            query: trimmedQuery,
+            group: { $0.group },
+            label: { label(for: $0) }
+        )
 
+        // The "New Section" row closes out the destination list, exactly
+        // where it sat before commands existed: after every matching
+        // section, above the command block.
         if !trimmedQuery.isEmpty, !store.sections.contains(where: { $0.caseInsensitiveCompare(trimmedQuery) == .orderedSame }) {
-            items.append(.newSection(trimmedQuery))
+            let insertionIndex = items.firstIndex { $0.isCommand } ?? items.count
+            items.insert(.newSection(trimmedQuery), at: insertionIndex)
         }
 
         return items
+    }
+
+    /// The state the command list's visibility rules read; see
+    /// `PaletteCommand.isApplicable(in:)`.
+    private var paletteContext: PaletteContext {
+        let activeSection = store.activeSection
+        return PaletteContext(
+            isMoveMode: move,
+            activeSection: activeSection,
+            hasDoneNotesInScope: activeSection.map(hasDoneNotes(inSection:)) ?? store.activeNotes.contains(where: \.isDone),
+            hasDoneNotesInActiveSection: activeSection.map(hasDoneNotes(inSection:)) ?? false,
+            hasNotesInScope: !selection.visibleOrder.isEmpty
+        )
+    }
+
+    private func hasDoneNotes(inSection name: String) -> Bool {
+        store.activeNotes.contains { $0.isDone && $0.listName == name }
     }
 
     private func label(for result: Result) -> String {
@@ -205,6 +260,7 @@ struct SectionSwitcher: View {
         case .section(let name): return name
         case .noSection: return "No Section"
         case .newSection(let name): return "New Section: “\(name)”"
+        case .command(let command): return command.title
         }
     }
 
@@ -215,7 +271,7 @@ struct SectionSwitcher: View {
     /// "uniform answer is ungrouped" (inner `nil` — `.noSection` should
     /// check).
     private var uniformSelectionSection: String?? {
-        let sections = Set(store.notes.filter { selection.selectedIDs.contains($0.id) }.map(\.listName))
+        let sections = Set(store.activeNotes.filter { selection.selectedIDs.contains($0.id) }.map(\.listName))
         return sections.count == 1 ? sections.first : nil
     }
 
@@ -225,13 +281,13 @@ struct SectionSwitcher: View {
             switch result {
             case .section(let name): return uniformSection == name
             case .noSection: return uniformSection == nil
-            case .showAll, .newSection: return false
+            case .showAll, .newSection, .command: return false
             }
         }
         switch result {
         case .showAll: return store.activeSection == nil
         case .section(let name): return store.activeSection == name
-        case .noSection, .newSection: return false
+        case .noSection, .newSection, .command: return false
         }
     }
 
@@ -263,24 +319,51 @@ struct SectionSwitcher: View {
                 actions.move(toSection: nil)
             case .newSection(let name):
                 actions.move(toSection: name)
-            case .showAll:
+            case .showAll, .command:
                 break // Never produced by `results` in move mode.
             }
             dismiss()
             return
         }
 
+        // Picking any destination leaves the Logbook: it lists cleared
+        // notes, not a section's live ones, so switching sections behind it
+        // would leave the panel showing something else entirely.
         switch result {
         case .showAll:
+            selection.setShowingLogbook(false)
             store.setActiveSection(nil)
         case .section(let name):
+            selection.setShowingLogbook(false)
             store.setActiveSection(name)
         case .newSection(let name):
+            selection.setShowingLogbook(false)
             store.createSection(named: name)
+        case .command(let command):
+            // Dismiss first: some commands hand focus to another control
+            // (an inline rename field) or raise a confirmation dialog, and
+            // neither can happen behind the palette.
+            dismiss()
+            run(command)
+            return
         case .noSection:
             break // Never produced by `results` in switch mode.
         }
         dismiss()
+    }
+
+    private func run(_ command: PaletteCommand) {
+        switch command {
+        case .newSection: actions.createAndRenameNewSection()
+        case .renameSection: actions.renameActiveSection()
+        case .dissolveSection: actions.dissolveActiveSection()
+        case .deleteSection: actions.requestDeleteActiveSection()
+        case .clearDone: actions.clearDoneInScope()
+        case .clearDoneInSection: actions.clearDoneInActiveSection()
+        case .openLogbook: actions.openLogbook()
+        case .copyAllAsList: actions.copyAllAsList()
+        case .settings: actions.openSettings()
+        }
     }
 
     private func dismiss() {

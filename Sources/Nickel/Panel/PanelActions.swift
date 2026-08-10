@@ -24,7 +24,7 @@ final class PanelActions: ObservableObject {
     }
 
     private func notes(for ids: [UUID]) -> [Note] {
-        let byID = Dictionary(store.notes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let byID = Dictionary(store.activeNotes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { byID[$0] }
     }
 
@@ -32,7 +32,7 @@ final class PanelActions: ObservableObject {
         let ids = selection.selectedIDs
         guard !ids.isEmpty else { return false }
         var sawAny = false
-        for note in store.notes where ids.contains(note.id) {
+        for note in store.activeNotes where ids.contains(note.id) {
             if !note.isDone { return false }
             sawAny = true
         }
@@ -66,8 +66,13 @@ final class PanelActions: ObservableObject {
 
     // MARK: - Done / edit / merge / delete
 
+    /// Logbook rows are a read-only record: no done toggling, no editing, no
+    /// merging or moving. Every action that changes a note's content or place
+    /// checks this first; copying and selection stay available.
+    private var isShowingLogbook: Bool { selection.isShowingLogbook }
+
     func toggleDone() {
-        guard !selection.selectedIDs.isEmpty else { return }
+        guard !isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
         store.toggleDone(ids: selection.selectedIDs)
     }
 
@@ -81,9 +86,10 @@ final class PanelActions: ObservableObject {
     }
 
     func startEditingIfSingleSelected() {
-        guard selection.selectedIDs.count == 1,
+        guard !isShowingLogbook,
+              selection.selectedIDs.count == 1,
               let id = selection.selectedIDs.first,
-              let note = store.notes.first(where: { $0.id == id }) else { return }
+              let note = store.activeNotes.first(where: { $0.id == id }) else { return }
         selection.beginEditing(id: id, text: note.text)
     }
 
@@ -96,9 +102,10 @@ final class PanelActions: ObservableObject {
     /// reason `.nickelClosePanel` exists).
     func editInNewWindow() {
         commitActiveEditIfAny()
-        guard selection.selectedIDs.count == 1,
+        guard !isShowingLogbook,
+              selection.selectedIDs.count == 1,
               let id = selection.selectedIDs.first,
-              store.notes.contains(where: { $0.id == id }) else { return }
+              store.activeNotes.contains(where: { $0.id == id }) else { return }
         NotificationCenter.default.post(name: .nickelEditNoteInNewWindow, object: id)
     }
 
@@ -115,7 +122,7 @@ final class PanelActions: ObservableObject {
     }
 
     func merge() {
-        guard selection.selectedIDs.count >= 2 else { return }
+        guard !isShowingLogbook, selection.selectedIDs.count >= 2 else { return }
         let mergedID = selectedNotes.min(by: { $0.createdAt < $1.createdAt })?.id
         store.merge(ids: selection.selectedIDs)
         if let mergedID {
@@ -132,6 +139,12 @@ final class PanelActions: ObservableObject {
     /// list is now empty) nothing.
     func delete() {
         guard !selection.selectedIDs.isEmpty else { return }
+        // In the Logbook, ⌫ means "delete permanently", which always asks
+        // first (see `PanelView`'s confirmation dialog).
+        guard !isShowingLogbook else {
+            requestPermanentDelete(ids: selection.selectedIDs)
+            return
+        }
         // Snapshot both before mutating: `SelectionModel` prunes its
         // selection synchronously when the store's notes change, so reading
         // `selectedIDs` (or the computed `visibleOrder`) after the delete
@@ -161,10 +174,42 @@ final class PanelActions: ObservableObject {
         }
     }
 
+    // MARK: - Logbook
+
+    /// Moves the current selection to the Logbook — the soft, recoverable
+    /// counterpart to `delete()` (row context menu's "Move to Logbook",
+    /// ⌥⌫). No confirmation, since "Put Back" in the Logbook undoes it.
+    /// Selection pruning is handled generically by `SelectionModel` once the
+    /// notes leave `activeNotes`, the same way `delete()`'s removals are.
+    func moveToLogbook() {
+        guard !isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
+        store.archive(ids: selection.selectedIDs)
+    }
+
+    /// Puts archived notes back in the list (the Logbook's "Put Back").
+    func restore(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        store.restore(ids: ids)
+    }
+
+    /// Stages the "Delete Permanently…" confirmation; `confirmPermanentDelete`
+    /// is what actually deletes. Both the row context menu and ⌫ come through
+    /// here, so the confirmation can never be bypassed.
+    func requestPermanentDelete(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        selection.permanentDeleteConfirmation = ids
+    }
+
+    func confirmPermanentDelete() {
+        guard let ids = selection.permanentDeleteConfirmation else { return }
+        selection.permanentDeleteConfirmation = nil
+        store.deletePermanently(ids: ids)
+    }
+
     // MARK: - Move to list
 
     func move(toSection sectionName: String?) {
-        guard !selection.selectedIDs.isEmpty else { return }
+        guard !isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
         store.move(ids: selection.selectedIDs, toSection: sectionName)
     }
 
@@ -173,10 +218,73 @@ final class PanelActions: ObservableObject {
     /// its section header into inline rename mode so the user can type over
     /// the provisional name right away.
     func createSectionWithSelection() {
-        guard !selection.selectedIDs.isEmpty else { return }
+        guard !isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
         let name = store.uniqueProvisionalSectionName()
         store.move(ids: selection.selectedIDs, toSection: name)
         selection.beginRenamingSection(name)
+    }
+
+    // MARK: - Section commands
+
+    /// The ⋯ menu's (and the ⌘K palette's) "New Section": creates a
+    /// provisional section — which also switches to it, via `createSection` —
+    /// and puts its header into inline rename mode so the user can type over
+    /// the provisional name right away (Finder's "New Folder" pattern).
+    func createAndRenameNewSection() {
+        let name = store.uniqueProvisionalSectionName()
+        store.createSection(named: name)
+        selection.beginRenamingSection(name)
+    }
+
+    func renameActiveSection() {
+        guard let activeSection = store.activeSection else { return }
+        selection.beginRenamingSection(activeSection)
+    }
+
+    func dissolveActiveSection() {
+        guard let activeSection = store.activeSection else { return }
+        store.dissolveSection(activeSection)
+    }
+
+    func requestDeleteActiveSection() {
+        guard let activeSection = store.activeSection else { return }
+        requestDeleteSection(activeSection)
+    }
+
+    /// Deletes `name` immediately if it has no notes (Finder-like — nothing
+    /// to lose, so no confirmation), otherwise stages
+    /// `selection.sectionDeleteConfirmation` so `PanelView`'s dialog can
+    /// offer moving the notes to the Logbook (the default) or deleting them.
+    ///
+    /// The note count comes from `store.activeNotes` directly (not the
+    /// filtered, visible notes) so the dialog always reflects the section's
+    /// real contents regardless of an active search.
+    func requestDeleteSection(_ name: String) {
+        let count = store.activeNotes.filter { $0.listName == name }.count
+        guard count > 0 else {
+            store.deleteSection(name)
+            return
+        }
+        selection.sectionDeleteConfirmation = SectionDeleteConfirmation(name: name, noteCount: count)
+    }
+
+    /// "Clear Done", scoped the way the ⋯ menu's item is: the active section
+    /// if one is focused, otherwise everywhere.
+    func clearDoneInScope() {
+        store.clearDone()
+    }
+
+    func clearDoneInActiveSection() {
+        guard let activeSection = store.activeSection else { return }
+        store.clearDone(in: activeSection)
+    }
+
+    func openLogbook() {
+        selection.setShowingLogbook(true)
+    }
+
+    func openSettings() {
+        SettingsWindowController.shared.show()
     }
 
     // MARK: - Right-click

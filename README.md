@@ -1,16 +1,21 @@
 # Nickel
 
-Nickel is a personal-use knockoff of [Copper by shadcn](https://shadcn.com/copper),
-built because I wanted the workflow it describes and didn't want to wait. If
-you want the original (and to support the person who designed it),
+Nickel started as a shameless copy of
+[Copper by shadcn](https://shadcn.com/copper). Two reasons: I wanted to save
+the $39, and I wanted to see what Claude could build. Hence the name, which
+sounds like "nick all", as in "ooh, that sounds nice, I'll nick it." If you
+want the original (and to support the person who designed it),
 [buy Copper](https://shadcn.com/copper) instead.
 
-Knockoff does not mean careless. Nickel is held to the same bar an original
-would be: native AppKit/SwiftUI following macOS platform conventions and the
-Human Interface Guidelines, Finder-idiom interactions (inline rename,
-confirm-only-when-destructive), full keyboard operability, defensive
-persistence (atomic writes, corruption recovery, orphan cleanup), and
-deliberate visual design. No slop, no shortcuts that show.
+From this version on, Nickel goes its own way. It no longer tracks Copper;
+it grows into whatever suits my own workflow.
+
+Copied or not, the bar hasn't moved: native AppKit/SwiftUI following macOS
+platform conventions and the Human Interface Guidelines, Finder-idiom
+interactions (inline rename, confirm-only-when-destructive), full keyboard
+operability, defensive persistence (atomic writes, corruption recovery,
+orphan cleanup), and deliberate visual design. No slop, no shortcuts that
+show.
 
 Nickel is a macOS menu-bar scratchpad: double-tap the left Shift key anywhere
 to capture whatever text you have selected, or double-tap the right Shift
@@ -33,16 +38,17 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
   collapse for long notes, and drag-free custom lists ("Move to…").
 - **Sections**: named groups managed straight from their header — rename,
   reorder (Move Up/Down), clear done notes in just that section, dissolve
-  (ungroup, keeping the notes), or delete outright (with the notes). Cycle
-  through Show All and each section with ⇧⌘] / ⇧⌘[.
+  (ungroup, keeping the notes), or delete outright (choosing to move its
+  notes to the Logbook or delete them). Cycle through Show All and each
+  section with ⇧⌘] / ⇧⌘[.
 - **Standard app chrome**: Nickel is a regular macOS app — Dock icon, full
   "Nickel" menu bar when active, About panel, and update checks, with full
   Edit/View/Window/Help menus. A menu bar item is also shown (left-click
   toggles the panel; right-click shows an overflow menu), with a Settings
   toggle to hide it for hotkey-first use.
-- **Panel overflow menu**: section switching, Clear Done, Copy All as List,
-  Reveal Notes in Finder, Keyboard Shortcuts, a Keep on Top toggle, Close,
-  Settings…, and Quit.
+- **Panel overflow menu**: section switching, Clear Done, Open Logbook, Copy
+  All as List, Reveal Notes in Finder, Keyboard Shortcuts, a Keep on Top
+  toggle, Close, Settings…, and Quit.
 - **Frame persistence**: the panel remembers where you left it (position and
   size) across relaunches, and clamps back onscreen if a display is
   disconnected.
@@ -51,6 +57,11 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 - **Note length cap**: individual notes are capped at 20,000 characters
   (truncated with `…`) so an accidental "select all" on a huge document can't
   bloat the notes file.
+- **Logbook**: Clear Done (global or per-section) archives notes instead of
+  deleting them. The Logbook, opened from the overflow menu or the ⌘K
+  palette, lists cleared notes grouped by day, newest first; put a note back
+  (to its section, or ungrouped if the section is gone) or delete it
+  permanently, with confirmation.
 - **Local-only storage**: notes live in a plain JSON file on disk. No
   accounts, no telemetry, no cloud sync.
 
@@ -60,7 +71,7 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | -------- | ---------------------------------------------------------- |
 | **Left ⇧⇧**  | Capture the current selection                          |
 | **Right ⇧⇧** | Toggle the floating panel                               |
-| **⌘K**   | Switch section, or move the selection to a section           |
+| **⌘K**   | Commands, or move to section                                 |
 | **⇧⌘]**  | Next section                                                 |
 | **⇧⌘[**  | Previous section                                             |
 | **⇧⌘R**  | Rename the focused section                                   |
@@ -74,6 +85,7 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | **Return**| Edit the selected note (single selection only)              |
 | **⇧⌘M**  | Merge the selected notes into one                            |
 | **⌫**    | Delete the selected note(s)                                 |
+| **⌥⌫**   | Move the selected note(s) to the Logbook                     |
 | **Esc**  | Clear selection, cancel an edit, or dismiss the panel        |
 | **⌘W**   | Close the panel                                              |
 | **⌘,**   | Open Settings                                                |

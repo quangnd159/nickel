@@ -357,4 +357,46 @@ final class SelectionModelTests: XCTestCase {
         selection.moveSelection(direction: -1, extend: true)
         XCTAssertEqual(selection.selectedIDs, Set(ids[0...(ids.count - 2)]))
     }
+
+    // MARK: - Logbook
+
+    func testArchivedNotesAreExcludedFromTheListAndShownInTheLogbook() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+        store.toggleDone(ids: [idA])
+        store.clearDone()
+
+        XCTAssertEqual(selection.filteredNotes.map(\.id), [idB])
+        XCTAssertEqual(selection.visibleOrder, [idB])
+
+        selection.setShowingLogbook(true)
+
+        XCTAssertEqual(selection.filteredNotes.map(\.id), [idA])
+        XCTAssertEqual(selection.visibleOrder, [idA])
+    }
+
+    func testClearingDoneDropsTheArchivedNoteFromTheSelection() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+        store.toggleDone(ids: [idA])
+        selection.selectAllNotes()
+
+        store.clearDone()
+
+        XCTAssertEqual(selection.selectedIDs, [idB])
+    }
+
+    func testSwitchingToTheLogbookClearsTheSelection() {
+        store.add(text: "a", sourceApp: nil)
+        selection.selectAllNotes()
+
+        selection.setShowingLogbook(true)
+
+        XCTAssertTrue(selection.selectedIDs.isEmpty)
+        XCTAssertTrue(selection.isShowingLogbook)
+    }
 }

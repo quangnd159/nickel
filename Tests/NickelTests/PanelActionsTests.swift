@@ -100,6 +100,51 @@ final class PanelActionsTests: XCTestCase {
         XCTAssertEqual(selection.selectedIDs, [ids[0]])
     }
 
+    // MARK: - moveToLogbook
+
+    func testMoveToLogbookArchivesSelectionAndPrunesItFromTheList() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+
+        selection.selectedIDs = [ids[0]]
+        actions.moveToLogbook()
+
+        XCTAssertEqual(store.activeNotes.map(\.id), [ids[1]])
+        XCTAssertEqual(store.archivedNotes.map(\.id), [ids[0]])
+        XCTAssertTrue(selection.selectedIDs.isEmpty, "the archived note is no longer visible, so selection pruning must drop it")
+    }
+
+    func testMoveToLogbookWorksRegardlessOfDoneState() {
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+
+        selection.selectedIDs = [id]
+        actions.moveToLogbook()
+
+        XCTAssertNotNil(store.notes[0].archivedAt)
+    }
+
+    func testMoveToLogbookIsNoOpWhenLogbookIsShowing() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+        store.archive(ids: [ids[0]])
+        selection.setShowingLogbook(true)
+        // Selecting both the already-archived note and the still-live one
+        // directly (bypassing the click flow that would normally scope
+        // selection to what's on screen) so a wrongly-unguarded
+        // `moveToLogbook()` would have something live to (wrongly) archive.
+        selection.selectedIDs = [ids[0], ids[1]]
+
+        actions.moveToLogbook()
+
+        // Still live: had this gone through, `archive(ids:)` would have
+        // stamped it too.
+        XCTAssertNil(store.notes.first(where: { $0.id == ids[1] })?.archivedAt)
+        XCTAssertEqual(selection.selectedIDs, [ids[0], ids[1]], "no-op: selection in the Logbook is untouched")
+    }
+
     // MARK: - merge
 
     func testMergeKeepsEarliestCreatedNoteAndSelectsIt() {
@@ -242,6 +287,110 @@ final class PanelActionsTests: XCTestCase {
         selection.selectedIDs = Set(ids)
 
         XCTAssertTrue(actions.allSelectedAreDone)
+    }
+
+    // MARK: - Logbook
+
+    /// Archives the single note in the store and opens the Logbook with it
+    /// selected — the state every check below starts from.
+    private func archiveSingleNoteAndShowLogbook() -> UUID {
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+        selection.setShowingLogbook(true)
+        selection.selectSingle(id)
+        return id
+    }
+
+    func testLogbookDeleteAsksBeforeDeletingPermanently() {
+        store.add(text: "a", sourceApp: nil)
+        let id = archiveSingleNoteAndShowLogbook()
+
+        actions.delete()
+
+        XCTAssertEqual(selection.permanentDeleteConfirmation, [id])
+        XCTAssertEqual(store.notes.count, 1, "nothing is deleted until the dialog is confirmed")
+
+        actions.confirmPermanentDelete()
+
+        XCTAssertNil(selection.permanentDeleteConfirmation)
+        XCTAssertTrue(store.notes.isEmpty)
+    }
+
+    func testLogbookRowsAreReadOnly() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.toggleDone(ids: Set(store.notes.map(\.id)))
+        store.clearDone()
+        selection.setShowingLogbook(true)
+        selection.selectedIDs = Set(store.notes.map(\.id))
+
+        actions.toggleDone()
+        actions.startEditingIfSingleSelected()
+        actions.merge()
+        actions.move(toSection: "Work")
+
+        XCTAssertTrue(store.notes.allSatisfy(\.isDone))
+        XCTAssertNil(selection.editingID)
+        XCTAssertEqual(store.notes.count, 2)
+        XCTAssertTrue(store.notes.allSatisfy { $0.listName == nil })
+    }
+
+    func testRestorePutsTheNoteBackInTheList() {
+        store.add(text: "a", sourceApp: nil)
+        let id = archiveSingleNoteAndShowLogbook()
+
+        actions.restore(ids: [id])
+
+        XCTAssertEqual(store.activeNotes.map(\.id), [id])
+        XCTAssertTrue(store.archivedNotes.isEmpty)
+    }
+
+    // MARK: - Section commands
+
+    func testRequestDeleteSectionDeletesAnEmptySectionWithoutAsking() {
+        store.createSection(named: "Work")
+
+        actions.requestDeleteSection("Work")
+
+        XCTAssertNil(selection.sectionDeleteConfirmation)
+        XCTAssertTrue(store.sections.isEmpty)
+    }
+
+    func testRequestDeleteSectionStagesTheConfirmationWhenItHasNotes() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+
+        actions.requestDeleteSection("Work")
+
+        XCTAssertEqual(selection.sectionDeleteConfirmation?.name, "Work")
+        XCTAssertEqual(selection.sectionDeleteConfirmation?.noteCount, 1)
+        XCTAssertEqual(store.sections, ["Work"], "nothing is deleted until the dialog is answered")
+    }
+
+    func testSectionScopedCommandsDoNothingWithoutAnActiveSection() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        store.toggleDone(ids: [store.notes[0].id])
+        store.setActiveSection(nil)
+
+        actions.renameActiveSection()
+        actions.dissolveActiveSection()
+        actions.requestDeleteActiveSection()
+        actions.clearDoneInActiveSection()
+
+        XCTAssertNil(selection.renamingSectionName)
+        XCTAssertNil(selection.sectionDeleteConfirmation)
+        XCTAssertEqual(store.sections, ["Work"])
+        XCTAssertEqual(store.activeNotes.count, 1)
+    }
+
+    func testCreateAndRenameNewSectionSwitchesToItAndStartsTheRename() {
+        actions.createAndRenameNewSection()
+
+        XCTAssertEqual(store.sections.count, 1)
+        XCTAssertEqual(store.activeSection, store.sections.first)
+        XCTAssertEqual(selection.renamingSectionName, store.sections.first)
     }
 
     // MARK: - Duplicate note ids (corrupt store) regression

@@ -18,6 +18,7 @@ enum PanelCommand: CaseIterable {
     case editInNewWindow
     case toggleDone
     case delete
+    case moveToLogbook
     case escape
     case copy
     case toggleExpanded
@@ -34,7 +35,7 @@ enum PanelCommand: CaseIterable {
 /// `charactersIgnoringModifiers` (lowercased) plus an exact modifier set.
 enum PanelShortcutMatch {
     case keyCode(UInt16, modifiers: NSEvent.ModifierFlags?)
-    case keyCodes([UInt16])
+    case keyCodes([UInt16], modifiers: NSEvent.ModifierFlags?)
     case character(String, modifiers: NSEvent.ModifierFlags)
 
     func matches(_ event: NSEvent) -> Bool {
@@ -42,8 +43,9 @@ enum PanelShortcutMatch {
         case .keyCode(let code, let modifiers):
             guard event.keyCode == code else { return false }
             return modifiers.map { $0 == Self.exactModifiers(of: event) } ?? true
-        case .keyCodes(let codes):
-            return codes.contains(event.keyCode)
+        case .keyCodes(let codes, let modifiers):
+            guard codes.contains(event.keyCode) else { return false }
+            return modifiers.map { $0 == Self.exactModifiers(of: event) } ?? true
         case .character(let character, let modifiers):
             return Self.exactModifiers(of: event) == modifiers
                 && event.charactersIgnoringModifiers?.lowercased() == character
@@ -104,9 +106,15 @@ enum PanelShortcuts {
         ),
         PanelShortcut(
             command: .delete,
-            match: .keyCodes([51, 117]),
+            match: .keyCodes([51, 117], modifiers: []),
             menuShortcut: KeyboardShortcut(.delete, modifiers: []),
             overlay: ("Delete", ["⌫"])
+        ),
+        PanelShortcut(
+            command: .moveToLogbook,
+            match: .keyCodes([51, 117], modifiers: [.option]),
+            menuShortcut: KeyboardShortcut(.delete, modifiers: .option),
+            overlay: ("Move to Logbook", ["⌥", "⌫"])
         ),
         PanelShortcut(
             command: .escape,

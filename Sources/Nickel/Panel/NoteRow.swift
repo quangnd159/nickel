@@ -417,6 +417,9 @@ struct NoteRow: View {
 
         Divider()
 
+        Button("Move to Logbook") { actions.moveToLogbook() }
+            .panelKeyboardShortcut(.moveToLogbook)
+
         Button("Delete") { actions.delete() }
             .panelKeyboardShortcut(.delete)
     }

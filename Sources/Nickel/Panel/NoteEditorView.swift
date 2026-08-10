@@ -21,7 +21,7 @@ struct NoteEditorView: View {
         _text = State(initialValue: initialText)
     }
 
-    private var note: Note? { store.notes.first { $0.id == noteID } }
+    private var note: Note? { store.activeNotes.first { $0.id == noteID } }
 
     var body: some View {
         VStack(spacing: 0) {

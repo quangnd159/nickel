@@ -29,7 +29,7 @@ final class NoteEditorWindowManager {
     /// it — a note never gets a second window, matching Apple Notes' "Open
     /// Note in Separate Window."
     func open(noteID: UUID) {
-        guard let note = store.notes.first(where: { $0.id == noteID }) else { return }
+        guard let note = store.activeNotes.first(where: { $0.id == noteID }) else { return }
 
         if let existing = controllers[noteID] {
             NSApp.activate(ignoringOtherApps: true)
@@ -99,8 +99,11 @@ final class NoteEditorWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         applyTitle(for: note)
 
+        // An archived note counts as gone here, the same as a deleted one:
+        // the Logbook is a read-only record, so clearing a note closes its
+        // editing window.
         noteObserver = store.$notes.sink { [weak self] notes in
-            self?.noteDidChange(to: notes.first { $0.id == note.id })
+            self?.noteDidChange(to: notes.first { $0.id == note.id && $0.archivedAt == nil })
         }
     }
 

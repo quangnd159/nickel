@@ -40,7 +40,7 @@ struct ShortcutsOverlay: View {
             ])
 
             group("Navigate", [
-                ShortcutRow("Switch or move to section", ["⌘", "K"]),
+                ShortcutRow("Commands, or move to section", ["⌘", "K"]),
                 ShortcutRow("Next section", ["⇧", "⌘", "]"]),
                 ShortcutRow("Previous section", ["⇧", "⌘", "["]),
                 ShortcutRow("Rename section", ["⇧", "⌘", "R"]),
@@ -63,7 +63,8 @@ struct ShortcutsOverlay: View {
                 overlayRow(.editInNewWindow),
                 overlayRow(.toggleExpanded),
                 overlayRow(.merge),
-                overlayRow(.delete)
+                overlayRow(.delete),
+                overlayRow(.moveToLogbook)
             ])
         }
         .padding(16)

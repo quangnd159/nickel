@@ -523,8 +523,14 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             actions.toggleDone()
         case .delete:
             actions.delete()
+        case .moveToLogbook:
+            actions.moveToLogbook()
         case .escape:
-            if !actions.selection.selectedIDs.isEmpty {
+            if actions.selection.isShowingLogbook {
+                // Esc leaves the Logbook (which also clears its selection),
+                // the same way it backs out of any other take-over view.
+                actions.selection.setShowingLogbook(false)
+            } else if !actions.selection.selectedIDs.isEmpty {
                 actions.selection.clear()
             } else {
                 toggle()

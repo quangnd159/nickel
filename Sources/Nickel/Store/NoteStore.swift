@@ -65,6 +65,24 @@ final class NoteStore: ObservableObject {
         }
     }
 
+    // MARK: - Derived views of `notes`
+
+    /// Every note that hasn't been cleared into the Logbook — what the panel
+    /// shows, searches, counts, and acts on. Archived notes stay in `notes`
+    /// (nothing is deleted by clearing, and the launch-time attachment sweep
+    /// derives its known ids from `notes`), so every consumer outside the
+    /// Logbook reads through here instead.
+    var activeNotes: [Note] {
+        notes.filter { $0.archivedAt == nil }
+    }
+
+    /// The Logbook's contents: cleared notes, most recently cleared first.
+    var archivedNotes: [Note] {
+        notes
+            .filter { $0.archivedAt != nil }
+            .sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }
+    }
+
     // MARK: - Mutations
 
     /// Adds a note. `isCapture` marks this as coming from the double-shift
@@ -175,8 +193,12 @@ final class NoteStore: ObservableObject {
 
     func toggleDone(ids: Set<UUID>) {
         guard !ids.isEmpty else { return }
+        let now = Date()
         for index in notes.indices where ids.contains(notes[index].id) {
             notes[index].isDone.toggle()
+            // The completion stamp follows the done state, so the Logbook
+            // can say when a note was finished even if it's cleared later.
+            notes[index].completedAt = notes[index].isDone ? now : nil
         }
         scheduleSave()
     }
@@ -302,8 +324,12 @@ final class NoteStore: ObservableObject {
     /// Notes survive; the section grouping disappears (all matching notes'
     /// `listName` is cleared, the section is removed from `sections`, and if
     /// it was active, `activeSection` resets to Show All).
+    ///
+    /// Only live notes are touched: a note already in the Logbook keeps the
+    /// section name it was cleared from as part of that record, and
+    /// `restore(ids:)` ungroups it if the section is gone by then.
     func dissolveSection(_ name: String) {
-        let ids = Set(notes.filter { $0.listName == name }.map(\.id))
+        let ids = Set(activeNotes.filter { $0.listName == name }.map(\.id))
         for index in notes.indices where ids.contains(notes[index].id) {
             notes[index].listName = nil
         }
@@ -314,15 +340,37 @@ final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
-    /// Deletes `name` and every note in it — the opposite of `dissolveSection`,
-    /// which keeps the notes. Routed through `delete(ids:)` so attachment
-    /// directories are cleaned up like any other note deletion. No-op if
-    /// `name` isn't a known section.
+    /// Deletes `name` and every live note in it — the opposite of
+    /// `dissolveSection`, which keeps the notes. Routed through
+    /// `delete(ids:)` so attachment directories are cleaned up like any
+    /// other note deletion. Notes already in the Logbook are left alone:
+    /// deleting a section isn't a way to silently empty the record of
+    /// what was cleared. No-op if `name` isn't a known section.
     func deleteSection(_ name: String) {
         guard sections.contains(name) else { return }
-        let ids = Set(notes.filter { $0.listName == name }.map(\.id))
+        let ids = Set(activeNotes.filter { $0.listName == name }.map(\.id))
         if !ids.isEmpty {
             delete(ids: ids)
+        }
+        sections.removeAll { $0 == name }
+        if activeSection == name {
+            activeSection = nil
+        }
+        scheduleSave()
+    }
+
+    /// Archives `name` and every live note in it into the Logbook — the
+    /// recoverable counterpart to `deleteSection`. Stamps `archivedAt` on
+    /// each live note (notes already in the Logbook are left untouched,
+    /// same as `deleteSection`), then removes the section from `sections`.
+    /// Since the section is gone, `restore(ids:)` will ungroup these notes
+    /// when they're put back, the same as any other note whose section
+    /// disappeared in the meantime. No-op if `name` isn't a known section.
+    func archiveSection(_ name: String) {
+        guard sections.contains(name) else { return }
+        let archivedAt = Date()
+        for index in notes.indices where notes[index].listName == name && notes[index].archivedAt == nil {
+            notes[index].archivedAt = archivedAt
         }
         sections.removeAll { $0 == name }
         if activeSection == name {
@@ -342,11 +390,13 @@ final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
-    /// Deletes done notes. Scoped to the active section if one is set,
-    /// otherwise clears done notes across every section (and ungrouped).
+    /// Archives done notes into the Logbook (Things-style): nothing is
+    /// deleted, the notes just leave the list. Scoped to the active section
+    /// if one is set, otherwise clears done notes across every section (and
+    /// ungrouped).
     func clearDone() {
         guard let activeSection else {
-            removeDoneNotes(matching: \.isDone)
+            archiveNotes(matching: { $0.isDone && $0.archivedAt == nil })
             return
         }
         clearDone(in: activeSection)
@@ -359,19 +409,58 @@ final class NoteStore: ObservableObject {
     /// under the cursor even when a different section (or Show All) is
     /// focused.
     func clearDone(in sectionName: String) {
-        removeDoneNotes { $0.isDone && $0.listName == sectionName }
+        archiveNotes { $0.isDone && $0.archivedAt == nil && $0.listName == sectionName }
     }
 
-    /// Shared removal logic for `clearDone()` and `clearDone(in:)`: deletes
-    /// every note matching `predicate` and its attachments directory.
-    private func removeDoneNotes(matching predicate: (Note) -> Bool) {
-        let toRemove = notes.filter(predicate)
-        guard !toRemove.isEmpty else { return }
-        notes.removeAll(where: predicate)
-        for note in toRemove {
-            removeAttachmentsDirectory(forNoteID: note.id)
+    /// The note row's "Move to Logbook" / ⌥⌫: archives exactly the given
+    /// notes, done or not — the per-note counterpart to `clearDone`, which is
+    /// scoped by done state instead of by id. Only live notes are touched; a
+    /// note already in the Logbook keeps its original `archivedAt`. No-op if
+    /// `ids` is empty or none of them are live.
+    func archive(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        archiveNotes { ids.contains($0.id) && $0.archivedAt == nil }
+    }
+
+    /// Shared logic for `clearDone()`, `clearDone(in:)`, and `archive(ids:)`:
+    /// stamps `archivedAt` on every note matching `predicate`. The notes stay
+    /// in `notes` (so the launch-time attachment sweep still sees their ids)
+    /// and their attachment files stay on disk — the Logbook can put any of
+    /// them back.
+    private func archiveNotes(matching predicate: (Note) -> Bool) {
+        let archivedAt = Date()
+        var didArchive = false
+        for index in notes.indices where predicate(notes[index]) {
+            notes[index].archivedAt = archivedAt
+            didArchive = true
         }
+        guard didArchive else { return }
         scheduleSave()
+    }
+
+    /// The Logbook's "Put Back": clears `archivedAt` so these notes rejoin
+    /// the list, keeping their done state. A note whose section has been
+    /// deleted or renamed away in the meantime comes back ungrouped, the way
+    /// `dissolveSection` leaves notes.
+    func restore(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        var didRestore = false
+        for index in notes.indices where ids.contains(notes[index].id) && notes[index].archivedAt != nil {
+            notes[index].archivedAt = nil
+            if let listName = notes[index].listName, !sections.contains(listName) {
+                notes[index].listName = nil
+            }
+            didRestore = true
+        }
+        guard didRestore else { return }
+        scheduleSave()
+    }
+
+    /// The Logbook's "Delete Permanently": the same removal as any other
+    /// note deletion, attachment directories included. Named separately from
+    /// `delete(ids:)` so the call site reads as the irreversible action it is.
+    func deletePermanently(ids: Set<UUID>) {
+        delete(ids: ids)
     }
 
     /// Joins the text of the given notes (in note order, separated by a blank
@@ -633,9 +722,14 @@ final class NoteStore: ObservableObject {
     /// `sections` gets its listName appended to `sections` (so no note is
     /// ever silently orphaned from the section list), and `activeSection` is
     /// reset to nil if it no longer names a known section.
+    ///
+    /// Archived notes are ignored here: they're not shown in the list, and
+    /// one that was cleared from a since-deleted section must not bring that
+    /// section back at the next launch.
     private static func repaired(notes: [Note], sections: [String], activeSection: String?) -> Loaded {
         var repairedSections = sections
-        for listName in distinctListNames(in: notes) where !repairedSections.contains(listName) {
+        let live = notes.filter { $0.archivedAt == nil }
+        for listName in distinctListNames(in: live) where !repairedSections.contains(listName) {
             repairedSections.append(listName)
         }
 

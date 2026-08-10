@@ -56,21 +56,25 @@ struct StagedAttachment: Identifiable {
     var contentType: String
 }
 
-/// A pending "Delete Section and Notes…" confirmation: which section, and
-/// how many notes it holds (captured at request time, for the dialog's
-/// message — see `PanelView.requestDeleteSection`).
-private struct SectionDeleteConfirmation: Identifiable {
-    let name: String
-    let noteCount: Int
-    var id: String { name }
-}
-
 struct PanelView: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
     @State private var composerText = ""
     @State private var pendingAttachments: [StagedAttachment] = []
+    /// The composer's staged destination-section chip. See
+    /// `ComposerSectionChip` for the staging/removal logic; `stageSection`
+    /// and `removeStagedSection` below are what the "#" suggestion popup
+    /// calls when a row is accepted.
+    @State private var sectionChip = ComposerSectionChip()
+    /// The "#…" query Esc last dismissed the suggestion popup at, or `nil`
+    /// when nothing is dismissed. The popup itself has no state of its own:
+    /// its rows are derived from the composer text, the chip, the sections,
+    /// and this — see `ComposerSectionSuggestions.visibleRows`.
+    @State private var dismissedSuggestionQuery: String?
+    /// The suggestion popup's highlighted row. Clamped when read, so a
+    /// shrinking result set can never point past the end.
+    @State private var suggestionHighlight = 0
     @State private var isComposerDropTargeted = false
     /// The transient "Attached N file(s)" confirmation shown above the
     /// composer after a drop, paperclip pick, or ⌘V paste stages new
@@ -81,11 +85,6 @@ struct PanelView: View {
     /// the auto-dismiss timer instead of an old one hiding the new toast
     /// early.
     @State private var attachmentToastDismissTask: DispatchWorkItem?
-    /// Staged by the section header's "Delete Section and Notes…" when the
-    /// section isn't empty, so the `.confirmationDialog` in `body` can ask
-    /// before deleting; `nil` when no confirmation is pending. See
-    /// `requestDeleteSection`.
-    @State private var sectionDeleteConfirmation: SectionDeleteConfirmation?
     /// Mirrors the composer field's first-responder state (see
     /// `ComposerField.isFocused`), driving the card's focus ring.
     @State private var isComposerFocused = false
@@ -101,6 +100,14 @@ struct PanelView: View {
     /// longer note rather than a padded single-line field. The content row
     /// sits at the top and the growing field expands past this on its own.
     private static let composerMinHeight: CGFloat = 64
+
+    /// Distance from the composer row's leading edge (inside its own 16pt
+    /// padding) to the text field's leading edge: the circle glyph's
+    /// rendered width (19pt, same assumption `NoteRow` makes about its own
+    /// checkbox glyph) plus the 12pt gap to the field. Used to indent the
+    /// chip row so its leading edge lines up with the composer text rather
+    /// than the circle.
+    private static let composerTextLeadingInset: CGFloat = 19 + 12
 
     /// The composer's focus ring follows AppKit: only while the field
     /// actually holds focus and the panel is the key window, and never while
@@ -131,8 +138,11 @@ struct PanelView: View {
                 // The global empty state only applies in Show All: with an
                 // active section, the pinned header + per-section hint must
                 // show even when there are no notes anywhere yet (e.g. the
-                // user's very first action was typing "# Name").
-                if store.notes.isEmpty && selection.searchText.isEmpty && store.activeSection == nil {
+                // user's very first action was staging a "#" section chip).
+                if selection.isShowingLogbook {
+                    LogbookView()
+                        .transition(sectionSwitchTransition)
+                } else if store.activeNotes.isEmpty && selection.searchText.isEmpty && store.activeSection == nil {
                     emptyState
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
@@ -144,8 +154,16 @@ struct PanelView: View {
                         .padding(.top, 10)
                 }
 
-                composer
-                    .padding(.top, 10)
+                // No composer in the Logbook: it's a record of cleared
+                // notes, not somewhere new ones are captured.
+                if !selection.isShowingLogbook {
+                    composer
+                        .padding(.top, 10)
+                        .transition(sectionSwitchTransition)
+                        // Keeps the composer's "#" suggestion popup drawing
+                        // over the note list above it.
+                        .zIndex(1)
+                }
             }
             .padding(16)
 
@@ -176,20 +194,46 @@ struct PanelView: View {
         .confirmationDialog(
             "Delete Section",
             isPresented: Binding(
-                get: { sectionDeleteConfirmation != nil },
-                set: { isPresented in if !isPresented { sectionDeleteConfirmation = nil } }
+                get: { selection.sectionDeleteConfirmation != nil },
+                set: { isPresented in if !isPresented { selection.sectionDeleteConfirmation = nil } }
             ),
-            presenting: sectionDeleteConfirmation
+            presenting: selection.sectionDeleteConfirmation
         ) { confirmation in
-            Button("Delete", role: .destructive) {
+            Button("Move Notes to Logbook") {
+                store.archiveSection(confirmation.name)
+                selection.sectionDeleteConfirmation = nil
+            }
+            Button("Delete Notes", role: .destructive) {
                 store.deleteSection(confirmation.name)
-                sectionDeleteConfirmation = nil
+                selection.sectionDeleteConfirmation = nil
             }
             Button("Cancel", role: .cancel) {
-                sectionDeleteConfirmation = nil
+                selection.sectionDeleteConfirmation = nil
             }
         } message: { confirmation in
-            Text("Delete \"\(confirmation.name)\" and its \(confirmation.noteCount) \(confirmation.noteCount == 1 ? "note" : "notes")?")
+            Text("Delete \"\(confirmation.name)\"? Its \(confirmation.noteCount) \(confirmation.noteCount == 1 ? "note" : "notes") can move to the Logbook or be deleted.")
+        }
+        // The Logbook's "Delete Permanently…" (context menu or ⌫). Staged on
+        // `SelectionModel` rather than local `@State` because ⌫ is handled in
+        // `FloatingPanel`, which can't reach this view's state.
+        .confirmationDialog(
+            "Delete Permanently",
+            isPresented: Binding(
+                get: { selection.permanentDeleteConfirmation != nil },
+                set: { isPresented in if !isPresented { selection.permanentDeleteConfirmation = nil } }
+            ),
+            presenting: selection.permanentDeleteConfirmation
+        ) { _ in
+            Button("Delete", role: .destructive) {
+                actions.confirmPermanentDelete()
+            }
+            Button("Cancel", role: .cancel) {
+                selection.permanentDeleteConfirmation = nil
+            }
+        } message: { ids in
+            Text(ids.count == 1
+                 ? "Delete this note permanently? This can't be undone."
+                 : "Delete these \(ids.count) notes permanently? This can't be undone.")
         }
     }
 
@@ -215,7 +259,12 @@ struct PanelView: View {
             if case .sectionSwitcher = selection.presentedOverlay {
                 selection.presentedOverlay = nil
             } else {
-                selection.presentedOverlay = .sectionSwitcher(move: !selection.selectedIDs.isEmpty)
+                // Logbook rows can't be moved into a section (see
+                // `PanelActions.move`), so a selection there mustn't open the
+                // palette in move mode — ⌘K stays the switch-and-command
+                // palette, and picking a destination leaves the Logbook.
+                let move = !selection.isShowingLogbook && !selection.selectedIDs.isEmpty
+                selection.presentedOverlay = .sectionSwitcher(move: move)
             }
         }
     }
@@ -259,13 +308,9 @@ struct PanelView: View {
                         ))
                     }
 
-                    Button("New Section") { createAndRenameNewSection() }
+                    Button("New Section") { actions.createAndRenameNewSection() }
 
-                    Button("Rename Section") {
-                        if let activeSection = store.activeSection {
-                            selection.beginRenamingSection(activeSection)
-                        }
-                    }
+                    Button("Rename Section") { actions.renameActiveSection() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
                     .disabled(store.activeSection == nil)
                 }
@@ -276,6 +321,10 @@ struct PanelView: View {
                     store.clearDone()
                 }
                 .disabled(!hasDoneNotesInScope)
+
+                Button("Logbook") {
+                    selection.setShowingLogbook(true)
+                }
 
                 Button("Copy All as List") {
                     actions.copyAllAsList()
@@ -452,7 +501,7 @@ struct PanelView: View {
                     // estimate error.
                     .onChange(of: selection.editingID) { _, editingID in
                         guard let editingID,
-                              let note = store.notes.first(where: { $0.id == editingID }),
+                              let note = store.activeNotes.first(where: { $0.id == editingID }),
                               let rowFrame = selection.rowViewportFrames[editingID] else { return }
                         let finalBottom = rowFrame.minY + editedRowHeight(text: note.text, rowWidth: rowFrame.width)
                         guard finalBottom > geometry.size.height else { return }
@@ -473,7 +522,8 @@ struct PanelView: View {
         // Drives both the pinned header's appearance/disappearance and the
         // swap between the focused-section view and "Show All" with the same
         // spring used for row insert/delete/move, so switching sections
-        // (menu, ⌘K, or "# Name") animates instead of hard-cutting. The
+        // (menu, ⌘K, or a composer "#" chip) animates instead of
+        // hard-cutting. The
         // composer/search bar don't move: `noteList` already fills a fixed
         // slice of the outer `VStack`, so the header's appearance only
         // resizes the `GeometryReader` below it, not the panel around it.
@@ -588,39 +638,22 @@ struct PanelView: View {
 
             Divider()
 
-            // Dissolve keeps the notes (ungrouping them); Delete removes
-            // them too — kept as separate, clearly-labeled items rather than
-            // one "Delete" that's ambiguous about which it means.
+            // Dissolve keeps the notes (ungrouping them) and never asks;
+            // Delete Section… also keeps the notes by default (moving them to
+            // the Logbook) but offers permanent deletion as the destructive
+            // alternative in its confirmation — kept as separate,
+            // clearly-labeled items rather than one "Delete" that's
+            // ambiguous about which it means.
             Button("Dissolve Section") { store.dissolveSection(sectionName) }
 
-            Button("Delete Section and Notes…", role: .destructive) {
-                requestDeleteSection(sectionName)
+            Button("Delete Section…", role: .destructive) {
+                actions.requestDeleteSection(sectionName)
             }
         }
     }
 
-    /// One item in the section header's context menu: deletes `name`
-    /// immediately if it has no notes (Finder-like — nothing to lose, so no
-    /// confirmation), otherwise stages `sectionDeleteConfirmation` so the
-    /// `.confirmationDialog` in `body` can ask first.
-    private func requestDeleteSection(_ name: String) {
-        let count = noteCount(inSection: name)
-        guard count > 0 else {
-            store.deleteSection(name)
-            return
-        }
-        sectionDeleteConfirmation = SectionDeleteConfirmation(name: name, noteCount: count)
-    }
-
-    /// Note count for `name`, from `store.notes` directly (not
-    /// `selection.filteredNotes`) so the delete confirmation always reflects
-    /// the section's real contents regardless of an active search filter.
-    private func noteCount(inSection name: String) -> Int {
-        store.notes.filter { $0.listName == name }.count
-    }
-
     private func hasDoneNotes(inSection name: String) -> Bool {
-        store.notes.contains { $0.isDone && $0.listName == name }
+        store.activeNotes.contains { $0.isDone && $0.listName == name }
     }
 
     /// Shared empty-area click handler: resigns first responder (which
@@ -650,19 +683,9 @@ struct PanelView: View {
     /// the ⋯ menu's "Clear Done" when there's nothing for it to do.
     private var hasDoneNotesInScope: Bool {
         if let activeSection = store.activeSection {
-            return store.notes.contains { $0.isDone && $0.listName == activeSection }
+            return store.activeNotes.contains { $0.isDone && $0.listName == activeSection }
         }
-        return store.notes.contains(where: \.isDone)
-    }
-
-    /// The ⋯ menu's "New Section": creates a provisional section (Finder's
-    /// "New Folder" pattern) — which also switches to it, via
-    /// `createSection` — and puts its header into inline rename mode so the
-    /// user can type over the provisional name right away.
-    private func createAndRenameNewSection() {
-        let name = store.uniqueProvisionalSectionName()
-        store.createSection(named: name)
-        selection.beginRenamingSection(name)
+        return store.activeNotes.contains(where: \.isDone)
     }
 
     // MARK: - Empty state
@@ -684,8 +707,8 @@ struct PanelView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !pendingAttachments.isEmpty {
-                pendingAttachmentsRow
+            if sectionChip.name != nil || !pendingAttachments.isEmpty {
+                pendingChipsRow
             }
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "circle")
@@ -694,9 +717,17 @@ struct PanelView: View {
                     .frame(height: 19)
                     .accessibilityHidden(true)
 
-                ComposerField(text: $composerText, isFocused: $isComposerFocused, onCommit: commitComposer)
+                ComposerField(
+                    text: $composerText,
+                    isFocused: $isComposerFocused,
+                    onCommit: commitComposer,
+                    onDeleteBackwardAtStart: removeStagedSectionIfPresent,
+                    onMoveHighlight: moveSuggestionHighlight,
+                    onAcceptSuggestion: acceptHighlightedSuggestion,
+                    onEscape: dismissSuggestions
+                )
                     .font(.system(size: 14))
-                    .accessibilityLabel("Add a note or a prompt")
+                    .accessibilityLabel("Add a note")
 
                 Button(action: presentAttachmentPicker) {
                     Image(systemName: "paperclip")
@@ -757,6 +788,178 @@ struct PanelView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        // The "#" suggestion popup sits above the composer (which lives at
+        // the bottom of the panel), floating over the note list without
+        // resizing anything.
+        //
+        // The geometry is deliberately explicit rather than guide-based: the
+        // overlay's content is a fixed `suggestionListMaxHeight`-tall box,
+        // aligned by the overlay to the card's top edge and then offset up by
+        // its own height plus the 8pt gap, so the box's bottom edge lands
+        // exactly 8pt above the card. The popup is bottom-aligned inside that
+        // box and hugs its rows (`fixedSize`), so a shorter list grows
+        // downward from the top of the box and its bottom edge stays put —
+        // the composer's text and chip row are never covered. The empty part
+        // of the box draws nothing and takes no clicks.
+        .overlay(alignment: .top) {
+            if !suggestionRows.isEmpty {
+                sectionSuggestionPopup
+                    .frame(height: Self.suggestionListMaxHeight, alignment: .bottom)
+                    .offset(y: -(Self.suggestionListMaxHeight + 8))
+                    .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)))
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: suggestionRows.isEmpty)
+        .onChange(of: composerText) { _, newText in
+            suggestionHighlight = 0
+            dismissedSuggestionQuery = ComposerSectionSuggestions.dismissalAfterTextChange(
+                text: newText,
+                hasStagedSection: sectionChip.name != nil,
+                dismissedQuery: dismissedSuggestionQuery
+            )
+        }
+    }
+
+    // MARK: - "#" section suggestions
+
+    /// Height budget for the popup's scrolling list: about six rows (a 13pt
+    /// row plus its padding and the 2pt inter-row gap) before it scrolls,
+    /// plus the list's own 6pt padding top and bottom.
+    private static let suggestionRowHeight: CGFloat = 29
+    private static let suggestionListMaxHeight: CGFloat = suggestionRowHeight * 6 + 12
+
+    private var suggestionRows: [ComposerSectionSuggestion] {
+        ComposerSectionSuggestions.visibleRows(
+            text: composerText,
+            hasStagedSection: sectionChip.name != nil,
+            sections: store.sections,
+            dismissedQuery: dismissedSuggestionQuery
+        )
+    }
+
+    /// The highlighted index, clamped into the current rows.
+    private var highlightedSuggestionIndex: Int {
+        min(max(suggestionHighlight, 0), max(suggestionRows.count - 1, 0))
+    }
+
+    /// The Spotlight-style list of destination sections shown while the
+    /// composer holds a bare "#…" line. Deliberately an in-panel overlay, not
+    /// a window or popover: it has to feel like part of the composer, and it
+    /// must never take first responder away from the text field.
+    private var sectionSuggestionPopup: some View {
+        let rows = suggestionRows
+        let highlighted = highlightedSuggestionIndex
+
+        return ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        suggestionRow(row, isHighlighted: index == highlighted)
+                            .id(row.id)
+                            .onTapGesture { acceptSuggestion(row, refocusingComposer: true) }
+                            .onHover { isHovering in
+                                if isHovering { suggestionHighlight = index }
+                            }
+                    }
+                }
+                .padding(6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            // `fixedSize` after the cap is what makes the list hug its rows:
+            // a `ScrollView` handed a concrete height proposal takes all of
+            // it, so without this a two-row popup would still be six rows
+            // tall. With a nil proposal it reports its content's height, and
+            // the cap above clamps that to six rows (scrolling past them).
+            .frame(maxHeight: Self.suggestionListMaxHeight)
+            .fixedSize(horizontal: false, vertical: true)
+            .onChange(of: highlighted) { _, newIndex in
+                guard rows.indices.contains(newIndex) else { return }
+                proxy.scrollTo(rows[newIndex].id)
+            }
+        }
+        .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
+        .panelElevation()
+    }
+
+    /// One popup row, matching `SectionSwitcher`'s rows: the same accent
+    /// highlight (unemphasized behind an inactive panel), and the same
+    /// "New Section: “…”" wording for the create row.
+    private func suggestionRow(_ row: ComposerSectionSuggestion, isHighlighted: Bool) -> some View {
+        let isEmphasized = controlActiveState == .key
+        let usesAccentFill = isHighlighted && isEmphasized
+
+        return HStack(spacing: 8) {
+            Text(suggestionLabel(row))
+                .font(.system(size: 13))
+                .foregroundStyle(usesAccentFill ? Color.white : Color.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isHighlighted
+                      ? (isEmphasized
+                         ? Color(nsColor: .selectedContentBackgroundColor)
+                         : Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+                      : Color.clear)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func suggestionLabel(_ row: ComposerSectionSuggestion) -> String {
+        switch row {
+        case .existing(let name): return name
+        case .create(let name): return "New Section: “\(name)”"
+        }
+    }
+
+    /// ↓/↑ while the popup is open. Returns whether it was handled, so the
+    /// arrow keeps its normal caret behavior when there's no popup.
+    private func moveSuggestionHighlight(_ direction: Int) -> Bool {
+        let rows = suggestionRows
+        guard !rows.isEmpty else { return false }
+        suggestionHighlight = ComposerSectionSuggestions.movedHighlight(
+            highlightedSuggestionIndex,
+            by: direction,
+            count: rows.count
+        )
+        return true
+    }
+
+    /// Return/Tab while the popup is open: stage the highlighted row.
+    private func acceptHighlightedSuggestion() -> Bool {
+        let rows = suggestionRows
+        guard rows.indices.contains(highlightedSuggestionIndex) else { return false }
+        acceptSuggestion(rows[highlightedSuggestionIndex], refocusingComposer: false)
+        return true
+    }
+
+    /// Stages `row` as the chip and empties the field, ready for the note's
+    /// body. A click has to hand focus back to the text field afterwards; a
+    /// keystroke never lost it.
+    private func acceptSuggestion(_ row: ComposerSectionSuggestion, refocusingComposer: Bool) {
+        stageSection(named: row.name)
+        composerText = ComposerSectionSuggestions.textAfterAcceptance
+        dismissedSuggestionQuery = nil
+        suggestionHighlight = 0
+        if refocusingComposer {
+            NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+        }
+    }
+
+    /// Esc while the popup is open: close it and keep the literal text, so
+    /// "#hashtag" stays typeable. Returns whether it was handled, so Esc
+    /// keeps its existing meaning when no popup is showing.
+    private func dismissSuggestions() -> Bool {
+        guard !suggestionRows.isEmpty,
+              let query = ComposerSectionSuggestions.query(in: composerText, hasStagedSection: sectionChip.name != nil)
+        else { return false }
+        dismissedSuggestionQuery = query
+        return true
     }
 
     /// Floated over the composer's (dimmed, still-visible) contents while a
@@ -812,19 +1015,115 @@ struct PanelView: View {
         )
     }
 
-    /// The staged-attachment chips shown above the composer's text field.
-    private var pendingAttachmentsRow: some View {
+    /// Shared shell for the composer's staged chips (section destination and
+    /// attachments): same capsule padding/shape, and a hover-revealed
+    /// remove button in the macOS Mail token style — hidden at rest, faded
+    /// in over the pointer, never shifting the chip's size. The button
+    /// stays in the layout at `.opacity(0)` (rather than being removed)
+    /// so the chip's width never changes on hover, and `.allowsHitTesting`
+    /// keeps it unclickable while hidden. Because hover is unavailable to
+    /// keyboard/VoiceOver users, removal is also exposed as a named
+    /// accessibility action on the chip itself.
+    private struct ComposerChip<Content: View>: View {
+        let fill: AnyShapeStyle
+        let accessibilityLabel: String
+        let onRemove: () -> Void
+        @ViewBuilder let content: () -> Content
+
+        @State private var isHovering = false
+
+        var body: some View {
+            HStack(spacing: 6) {
+                content()
+
+                Button(action: onRemove) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
+                .animation(.easeInOut(duration: 0.1), value: isHovering)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(fill)
+            )
+            .onHover { isHovering = $0 }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(accessibilityLabel)
+            .accessibilityAction(named: Text("Remove"), onRemove)
+        }
+    }
+
+    /// The staged section chip and attachment chips, shown together above
+    /// the composer's text field. The section chip (at most one) always
+    /// leads, so it reads as "where this note is headed" ahead of "what's
+    /// attached". Indented by `composerTextLeadingInset` so the row's
+    /// leading edge lines up with the composer text, not the circle glyph.
+    private var pendingChipsRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
+                if let section = sectionChip.name {
+                    pendingSectionChip(section)
+                }
                 ForEach(pendingAttachments) { staged in
                     pendingAttachmentChip(staged)
                 }
             }
+            .padding(.leading, Self.composerTextLeadingInset)
         }
     }
 
+    /// The staged destination-section chip. A "number" glyph stands in for
+    /// the section's own hash-icon elsewhere in the app. The glyph and the
+    /// section name are accent-tinted on a faint accent fill, so the chip
+    /// reads as destination metadata (a tag) rather than attached content;
+    /// an existing-but-not-yet-created section still gets a small secondary
+    /// "New" label so the note's destination doesn't look ambiguous before
+    /// it commits.
+    private func pendingSectionChip(_ section: String) -> some View {
+        let isNewSection = !store.sections.contains { $0.caseInsensitiveCompare(section) == .orderedSame }
+
+        return ComposerChip(
+            fill: AnyShapeStyle(Color.accentColor.opacity(0.12)),
+            accessibilityLabel: isNewSection ? "Destination section, \(section), new" : "Destination section, \(section)",
+            onRemove: removeStagedSection
+        ) {
+            Image(systemName: "number")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.accentColor)
+                .frame(width: 24, height: 24)
+
+            Text(section)
+                .font(.system(size: 11))
+                .foregroundStyle(Color.accentColor)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 120, alignment: .leading)
+
+            if isNewSection {
+                Text("New")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+
+    /// A staged attachment chip: unlike the section chip, stays neutral
+    /// (quaternary fill, no tint) since it represents content, not metadata.
     private func pendingAttachmentChip(_ staged: StagedAttachment) -> some View {
-        HStack(spacing: 6) {
+        ComposerChip(
+            fill: AnyShapeStyle(.quaternary),
+            accessibilityLabel: "Attachment, \(staged.filename)",
+            onRemove: {
+                Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
+                pendingAttachments.removeAll { $0.id == staged.id }
+            }
+        ) {
             AttachmentThumbnailView(fileURL: staged.sourceURL, contentType: staged.contentType, size: 24)
                 .frame(width: 24, height: 24)
                 .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
@@ -834,23 +1133,7 @@ struct PanelView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: 120, alignment: .leading)
-
-            Button(action: {
-                Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
-                pendingAttachments.removeAll { $0.id == staged.id }
-            }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(.quaternary)
-        )
     }
 
     /// The composer's paperclip button: opens a standard file picker whose
@@ -1022,57 +1305,67 @@ struct PanelView: View {
     }
 
     /// Return in the composer: commits its text plus any staged attachments
-    /// as a new note. Either alone is enough (an attachment-only note, or —
-    /// as before this feature — plain text), so only both being empty is a
-    /// no-op.
+    /// and staged section chip as a new note (or, chip-only, just creates or
+    /// switches to that section). See `ComposerCommit.plan` for the decision
+    /// logic this drives from.
     private func commitComposer() {
         let text = composerText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !pendingAttachments.isEmpty else { return }
 
-        // The "# Name" section shortcut only makes sense for a bare text
-        // note; with attachments staged, "#foo" is just note text.
-        if pendingAttachments.isEmpty, let command = composerSectionCommandName(text) {
-            if let name = command {
-                store.createSection(named: name)
-                composerText = ""
-            }
-            // Else: a bare "#" or "# " with nothing typed after it yet — a
-            // no-op, leaving the text in place so the user can keep typing.
+        switch ComposerCommit.plan(text: text, hasAttachments: !pendingAttachments.isEmpty, pendingSection: sectionChip.name) {
+        case .noop:
             return
-        }
 
-        if pendingAttachments.isEmpty {
-            store.add(text: text, sourceApp: nil)
-        } else {
-            let attachments = pendingAttachments.map { (sourceURL: $0.sourceURL, filename: $0.filename, contentType: $0.contentType) }
-            let failedIndices = store.add(text: text, attachments: attachments, sourceApp: nil)
-            let failed = Set(failedIndices)
-            for (index, staged) in pendingAttachments.enumerated() where !failed.contains(index) {
-                Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
+        case .sectionOnly(let section):
+            store.createSection(named: section)
+            sectionChip.remove()
+
+        case .addNote(let section):
+            if let section {
+                store.createSection(named: section)
             }
-            // Items that failed to copy stay staged — their temp files
-            // (e.g. a pasted screenshot with no other copy) survive, and the
-            // user can retry (Return again) or remove the chip.
-            pendingAttachments = failedIndices.compactMap { pendingAttachments.indices.contains($0) ? pendingAttachments[$0] : nil }
-            if !failedIndices.isEmpty {
-                showAttachmentFailureToast(count: failedIndices.count)
+            if pendingAttachments.isEmpty {
+                store.add(text: text, sourceApp: nil)
+            } else {
+                let attachments = pendingAttachments.map { (sourceURL: $0.sourceURL, filename: $0.filename, contentType: $0.contentType) }
+                let failedIndices = store.add(text: text, attachments: attachments, sourceApp: nil)
+                let failed = Set(failedIndices)
+                for (index, staged) in pendingAttachments.enumerated() where !failed.contains(index) {
+                    Self.removeTemporaryStagingDirectory(for: staged.sourceURL)
+                }
+                // Items that failed to copy stay staged — their temp files
+                // (e.g. a pasted screenshot with no other copy) survive, and
+                // the user can retry (Return again) or remove the chip.
+                pendingAttachments = failedIndices.compactMap { pendingAttachments.indices.contains($0) ? pendingAttachments[$0] : nil }
+                if !failedIndices.isEmpty {
+                    showAttachmentFailureToast(count: failedIndices.count)
+                }
             }
+            composerText = ""
+            sectionChip.remove()
         }
-        composerText = ""
+        dismissedSuggestionQuery = nil
     }
 
-    /// Recognizes the composer's "# Name" section shortcut. Single line
-    /// only: text containing a newline is always a normal note. Returns:
-    /// - `nil` if `text` isn't a section command at all (a normal note,
-    ///   including a "#hashtag" with no separating space);
-    /// - `.some(nil)` for a bare "#"/"# " with no name yet (a no-op);
-    /// - `.some(name)` for "# Name" (create-or-switch to `name`).
-    private func composerSectionCommandName(_ text: String) -> String?? {
-        guard !text.contains("\n"), text.hasPrefix("#") else { return nil }
-        let rest = text.dropFirst()
-        guard rest.isEmpty || rest.hasPrefix(" ") else { return nil }
-        let name = rest.trimmingCharacters(in: .whitespaces)
-        return .some(name.isEmpty ? nil : name)
+    /// Stages `name` as the composer's destination-section chip, replacing
+    /// any previously staged chip. Called when a "#" suggestion row is
+    /// accepted.
+    private func stageSection(named name: String) {
+        sectionChip.stage(named: name)
+    }
+
+    private func removeStagedSection() {
+        sectionChip.remove()
+    }
+
+    /// ⌫ in the composer with the caret at the very start and nothing
+    /// selected: if a section chip is staged, remove it and swallow the
+    /// keystroke, rather than doing nothing. Returns whether it was handled,
+    /// so `ComposerField` knows whether to fall through to its normal
+    /// backspace behavior.
+    private func removeStagedSectionIfPresent() -> Bool {
+        guard sectionChip.name != nil else { return false }
+        removeStagedSection()
+        return true
     }
 }
 

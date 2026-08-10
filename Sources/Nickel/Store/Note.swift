@@ -10,6 +10,13 @@ struct Note: Identifiable, Codable, Equatable {
     /// Files/images attached to this note (Copper-style). A note with
     /// attachments and empty text is valid (an attachment-only note).
     var attachments: [Attachment]
+    /// When this note was cleared into the Logbook; nil for a live note.
+    /// Clearing done notes archives rather than deletes, so this is what
+    /// takes a note out of the panel's list without losing it.
+    var archivedAt: Date?
+    /// When this note was last marked done; cleared when it's marked not
+    /// done again. Nil for a note that has never been completed.
+    var completedAt: Date?
 
     init(
         id: UUID,
@@ -18,7 +25,9 @@ struct Note: Identifiable, Codable, Equatable {
         isDone: Bool,
         createdAt: Date,
         sourceApp: String?,
-        attachments: [Attachment] = []
+        attachments: [Attachment] = [],
+        archivedAt: Date? = nil,
+        completedAt: Date? = nil
     ) {
         self.id = id
         self.text = text
@@ -27,16 +36,19 @@ struct Note: Identifiable, Codable, Equatable {
         self.createdAt = createdAt
         self.sourceApp = sourceApp
         self.attachments = attachments
+        self.archivedAt = archivedAt
+        self.completedAt = completedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, text, listName, isDone, createdAt, sourceApp, attachments
+        case id, text, listName, isDone, createdAt, sourceApp, attachments, archivedAt, completedAt
     }
 
     /// Custom decoding (rather than the synthesized initializer) so files
     /// written before attachments existed keep loading: `attachments` is
     /// `decodeIfPresent`, defaulting to `[]` when the key is missing. The
     /// store format stays version 2 — this is purely additive.
+    /// `archivedAt`/`completedAt` (the Logbook) were added the same way.
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
@@ -46,5 +58,7 @@ struct Note: Identifiable, Codable, Equatable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         sourceApp = try container.decodeIfPresent(String.self, forKey: .sourceApp)
         attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        archivedAt = try container.decodeIfPresent(Date.self, forKey: .archivedAt)
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
     }
 }

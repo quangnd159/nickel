@@ -27,6 +27,15 @@ struct RevealRequest: Equatable {
     let token = UUID()
 }
 
+/// A pending "Delete Section…" confirmation: which section, and how many
+/// notes it holds (captured at request time, for the dialog's message — see
+/// `PanelActions.requestDeleteSection`).
+struct SectionDeleteConfirmation: Identifiable, Equatable {
+    let name: String
+    let noteCount: Int
+    var id: String { name }
+}
+
 /// Shared selection/editing state for the note list, plus the click and
 /// keyboard-navigation logic that operates over the panel's current flat
 /// visible (filtered, grouped) order of notes.
@@ -58,6 +67,25 @@ final class SelectionModel: ObservableObject {
     /// the `.nickelToggleSectionSwitcher` / `.nickelToggleShortcuts`
     /// notifications posted by `FloatingPanel.performKeyEquivalent`.
     @Published var presentedOverlay: PanelOverlay?
+
+    /// True while the Logbook (cleared notes) has taken over the panel's
+    /// content area. Lives here — like `presentedOverlay` — so `FloatingPanel`
+    /// can consult it from its own key handling, where Esc returns to the
+    /// list and ⌫ means "delete permanently".
+    @Published private(set) var isShowingLogbook = false
+
+    /// Notes staged for the Logbook's "Delete Permanently…" confirmation;
+    /// `nil` when nothing is pending. Set by both the row context menu and
+    /// ⌫ (which is handled in `FloatingPanel`, hence the shared state rather
+    /// than `PanelView` `@State`), read by `PanelView`'s confirmation dialog.
+    @Published var permanentDeleteConfirmation: Set<UUID>?
+
+    /// The section staged for the three-button "Delete Section…"
+    /// confirmation; `nil` when nothing is pending. Lives here — like
+    /// `permanentDeleteConfirmation` — because both the section header's
+    /// context menu and the ⌘K palette raise it, and neither can reach
+    /// `PanelView`'s own state. Read by `PanelView`'s confirmation dialog.
+    @Published var sectionDeleteConfirmation: SectionDeleteConfirmation?
 
     /// Notes currently showing full (untruncated) text in the list, rather
     /// than the default 3-line clamp — session-only (not persisted to the
@@ -116,7 +144,14 @@ final class SelectionModel: ObservableObject {
         // there's no separate copy that can lag a store mutation by a frame.
         store.$notes
             .sink { [weak self] notes in
-                self?.pruneToExisting(ids: Set(notes.map(\.id)))
+                guard let self else { return }
+                // "Exists" means "exists in the list currently on screen":
+                // clearing a done note archives rather than deletes it, so
+                // it leaves the list without leaving `notes` — and a note
+                // that's no longer visible must not stay selected, or ⌫
+                // would act on something the user can't see.
+                let inScope = notes.filter { ($0.archivedAt != nil) == self.isShowingLogbook }
+                self.pruneToExisting(ids: Set(inScope.map(\.id)))
             }
             .store(in: &cancellables)
     }
@@ -136,14 +171,20 @@ final class SelectionModel: ObservableObject {
 
     // MARK: - Visible order derivation
 
+    /// The notes the panel is currently showing at all, before search: the
+    /// Logbook's cleared notes while it's open, otherwise the live ones.
+    private var scopedNotes: [Note] {
+        isShowingLogbook ? store.archivedNotes : store.activeNotes
+    }
+
     /// Notes matching `searchText` (case-insensitive substring over the
-    /// note's text and its attachments' filenames), or all of `store.notes`
+    /// note's text and its attachments' filenames), or all of `scopedNotes`
     /// when the search field is empty. The single source both `PanelView`'s
     /// rendering and `visibleOrder` below filter from, so the two can never
     /// diverge.
     var filteredNotes: [Note] {
-        guard !searchText.isEmpty else { return store.notes }
-        return store.notes.filter { note in
+        guard !searchText.isEmpty else { return scopedNotes }
+        return scopedNotes.filter { note in
             note.text.localizedCaseInsensitiveContains(searchText)
                 || note.attachments.contains { $0.filename.localizedCaseInsensitiveContains(searchText) }
         }
@@ -167,6 +208,10 @@ final class SelectionModel: ObservableObject {
     /// notes. Computed on demand (not cached) so it's always in step with
     /// the store — no pushed-copy sync to fall a frame behind a mutation.
     var visibleOrder: [UUID] {
+        // The Logbook is one flat, newest-cleared-first list (its day
+        // headers only break up that same order), not a sectioned one.
+        if isShowingLogbook { return filteredNotes.map(\.id) }
+
         let grouped = filteredNotesBySection
         if let activeSection = store.activeSection {
             return (grouped[activeSection] ?? []).map(\.id)
@@ -326,6 +371,21 @@ final class SelectionModel: ObservableObject {
             if let target = leadID.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first {
                 revealRequest = RevealRequest(id: target)
             }
+        }
+    }
+
+    // MARK: - Logbook
+
+    /// Opens or closes the Logbook. Either way the selection is dropped and
+    /// any in-progress edit ends: the two views list different notes, so
+    /// carrying selection across would leave rows selected out of sight.
+    func setShowingLogbook(_ isShowing: Bool) {
+        guard isShowingLogbook != isShowing else { return }
+        clear()
+        endEditing()
+        permanentDeleteConfirmation = nil
+        withAnimation(.noteRowSpring) {
+            isShowingLogbook = isShowing
         }
     }
 

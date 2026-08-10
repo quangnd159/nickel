@@ -44,6 +44,18 @@ final class PanelShortcutsTests: XCTestCase {
         XCTAssertEqual(PanelShortcuts.command(for: event), .moveDown)
     }
 
+    private static let deleteKeyCode: UInt16 = 51
+
+    func testPlainDeleteKeyDeletes() {
+        let event = keyEvent(keyCode: Self.deleteKeyCode)
+        XCTAssertEqual(PanelShortcuts.command(for: event), .delete)
+    }
+
+    func testOptionDeleteKeyMovesToLogbook() {
+        let event = keyEvent(keyCode: Self.deleteKeyCode, modifiers: .option)
+        XCTAssertEqual(PanelShortcuts.command(for: event), .moveToLogbook)
+    }
+
     func testEveryCommandHasExactlyOneTableEntry() {
         for command in PanelCommand.allCases {
             XCTAssertEqual(PanelShortcuts.all.filter { $0.command == command }.count, 1, "\(command)")

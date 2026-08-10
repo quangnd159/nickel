@@ -264,7 +264,8 @@ final class NoteStoreTests: XCTestCase {
         store.setActiveSection("Work")
         store.clearDone()
 
-        XCTAssertEqual(store.notes.map(\.id), [idB])
+        XCTAssertEqual(store.activeNotes.map(\.id), [idB])
+        XCTAssertEqual(store.archivedNotes.map(\.id), [idA])
     }
 
     func testClearDoneGlobalWhenNoActiveSection() {
@@ -276,7 +277,8 @@ final class NoteStoreTests: XCTestCase {
 
         store.clearDone()
 
-        XCTAssertTrue(store.notes.isEmpty)
+        XCTAssertTrue(store.activeNotes.isEmpty)
+        XCTAssertEqual(store.archivedNotes.count, 2)
     }
 
     func testClearDoneInSectionIgnoresActiveSection() {
@@ -290,7 +292,232 @@ final class NoteStoreTests: XCTestCase {
 
         store.clearDone(in: "Work")
 
-        XCTAssertEqual(store.notes.map(\.id), [idB])
+        XCTAssertEqual(store.activeNotes.map(\.id), [idB])
+        XCTAssertEqual(store.archivedNotes.map(\.id), [idA])
+    }
+
+    func testClearDoneArchivesRatherThanDeletingAndKeepsAttachments() throws {
+        let source = tempDirectory.appendingPathComponent("a.txt")
+        try "fileA".write(to: source, atomically: true, encoding: .utf8)
+        store.add(text: "a", attachments: [(sourceURL: source, filename: "a.txt", contentType: "public.text")], sourceApp: nil)
+        let note = store.notes[0]
+        let noteDirectory = store.attachmentsDirectory.appendingPathComponent(note.id.uuidString, isDirectory: true)
+        store.toggleDone(ids: [note.id])
+
+        store.clearDone()
+
+        XCTAssertEqual(store.notes.count, 1, "the note itself must survive being cleared")
+        XCTAssertNotNil(store.notes[0].archivedAt)
+        XCTAssertTrue(store.notes[0].isDone, "clearing doesn't change the done state")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: noteDirectory.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.url(for: store.notes[0].attachments[0], in: store.notes[0]).path))
+    }
+
+    func testClearDoneLeavesNotDoneNotesAlone() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.toggleDone(ids: [store.notes[0].id])
+
+        store.clearDone()
+
+        XCTAssertEqual(store.activeNotes.map(\.text), ["b"])
+    }
+
+    func testClearDoneDoesNotRestampAlreadyArchivedNotes() {
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+        let firstStamp = store.notes[0].archivedAt
+
+        store.add(text: "b", sourceApp: nil)
+        store.toggleDone(ids: [store.notes[1].id])
+        store.clearDone()
+
+        XCTAssertEqual(store.notes[0].archivedAt, firstStamp)
+    }
+
+    // MARK: - archive(ids:)
+
+    func testArchiveStampsArchivedAtOnLiveNotesRegardlessOfDoneState() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+        store.toggleDone(ids: [idA]) // a is done, b isn't
+
+        store.archive(ids: [idA, idB])
+
+        XCTAssertNotNil(store.notes[0].archivedAt)
+        XCTAssertNotNil(store.notes[1].archivedAt)
+        XCTAssertTrue(store.activeNotes.isEmpty)
+        XCTAssertEqual(Set(store.archivedNotes.map(\.id)), [idA, idB])
+    }
+
+    func testArchiveSkipsAlreadyArchivedNotesLeavingTheirTimestampUnchanged() {
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.archive(ids: [id])
+        let firstStamp = store.notes[0].archivedAt
+
+        store.archive(ids: [id])
+
+        XCTAssertEqual(store.notes[0].archivedAt, firstStamp)
+    }
+
+    func testArchiveIsNoOpForEmptyIDs() {
+        store.add(text: "a", sourceApp: nil)
+
+        store.archive(ids: [])
+
+        XCTAssertNil(store.notes[0].archivedAt)
+    }
+
+    func testArchiveIsNoOpForUnknownIDs() {
+        store.add(text: "a", sourceApp: nil)
+
+        store.archive(ids: [UUID()])
+
+        XCTAssertNil(store.notes[0].archivedAt)
+    }
+
+    // MARK: - Logbook (restore / delete permanently / completedAt)
+
+    func testActiveNotesExcludeArchivedAndArchivedAreNewestFirst() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.add(text: "c", sourceApp: nil)
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+
+        store.toggleDone(ids: [idA])
+        store.clearDone()
+        store.toggleDone(ids: [idB])
+        store.clearDone()
+
+        XCTAssertEqual(store.activeNotes.map(\.text), ["c"])
+        XCTAssertEqual(store.archivedNotes.map(\.text), ["b", "a"])
+    }
+
+    func testRestoreClearsArchivedAtAndKeepsDoneState() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+
+        store.restore(ids: [id])
+
+        XCTAssertNil(store.notes[0].archivedAt)
+        XCTAssertTrue(store.notes[0].isDone)
+        XCTAssertEqual(store.notes[0].listName, "Work")
+        XCTAssertEqual(store.activeNotes.map(\.id), [id])
+        XCTAssertTrue(store.archivedNotes.isEmpty)
+    }
+
+    func testRestoreUngroupsNoteWhoseSectionIsGone() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+        store.deleteSection("Work") // the archived note is the only one left in it
+
+        store.restore(ids: [id])
+
+        XCTAssertNil(store.notes.first(where: { $0.id == id })?.listName)
+    }
+
+    func testDeletePermanentlyRemovesNoteAndAttachmentsDirectory() throws {
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        let noteDirectory = store.attachmentsDirectory.appendingPathComponent(id.uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: noteDirectory, withIntermediateDirectories: true)
+        try "dummy".write(to: noteDirectory.appendingPathComponent("dummy.txt"), atomically: true, encoding: .utf8)
+        store.toggleDone(ids: [id])
+        store.clearDone()
+
+        store.deletePermanently(ids: [id])
+
+        XCTAssertTrue(store.notes.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: noteDirectory.path))
+    }
+
+    // MARK: - archiveSection
+
+    func testArchiveSectionArchivesLiveNotesRemovesSectionAndKeepsAttachments() throws {
+        let source = tempDirectory.appendingPathComponent("a.txt")
+        try "fileA".write(to: source, atomically: true, encoding: .utf8)
+        store.createSection(named: "Work")
+        store.add(text: "a", attachments: [(sourceURL: source, filename: "a.txt", contentType: "public.text")], sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+        let noteDirectory = store.attachmentsDirectory.appendingPathComponent(idA.uuidString, isDirectory: true)
+
+        store.archiveSection("Work")
+
+        XCTAssertEqual(store.notes.count, 2, "notes survive; they move to the Logbook, not deleted")
+        XCTAssertNotNil(store.notes.first(where: { $0.id == idA })?.archivedAt)
+        XCTAssertNotNil(store.notes.first(where: { $0.id == idB })?.archivedAt)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: noteDirectory.path), "attachments are untouched by archiving")
+        XCTAssertFalse(store.sections.contains("Work"))
+    }
+
+    func testArchiveSectionResetsActiveSectionWhenItWasActive() {
+        store.createSection(named: "Work")
+        store.setActiveSection("Work")
+
+        store.archiveSection("Work")
+
+        XCTAssertNil(store.activeSection)
+    }
+
+    func testArchiveSectionLeavesAlreadyArchivedNotesUntouched() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+        let originalArchivedAt = store.notes[0].archivedAt
+
+        store.archiveSection("Work")
+
+        XCTAssertEqual(store.notes[0].archivedAt, originalArchivedAt, "a note already in the Logbook keeps its original archive timestamp")
+    }
+
+    func testArchiveSectionIsNoOpForUnknownName() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+
+        store.archiveSection("Nonexistent")
+
+        XCTAssertNil(store.notes[0].archivedAt)
+        XCTAssertTrue(store.sections.contains("Work"))
+    }
+
+    func testRestoreUngroupsNoteArchivedByArchiveSection() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+
+        store.archiveSection("Work")
+        store.restore(ids: [id])
+
+        XCTAssertNil(store.notes.first(where: { $0.id == id })?.listName)
+        XCTAssertNil(store.notes.first(where: { $0.id == id })?.archivedAt)
+    }
+
+    func testToggleDoneStampsAndClearsCompletedAt() {
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        XCTAssertNil(store.notes[0].completedAt)
+
+        store.toggleDone(ids: [id])
+        XCTAssertNotNil(store.notes[0].completedAt)
+
+        store.toggleDone(ids: [id])
+        XCTAssertNil(store.notes[0].completedAt)
     }
 
     // MARK: - delete
@@ -556,6 +783,50 @@ final class NoteStoreTests: XCTestCase {
 
         XCTAssertEqual(note.text, "legacy note")
         XCTAssertTrue(note.attachments.isEmpty)
+        XCTAssertNil(note.archivedAt)
+        XCTAssertNil(note.completedAt)
+    }
+
+    func testArchivedAndCompletedStampsRoundTrip() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let idA = store.notes[0].id
+        store.toggleDone(ids: [idA])
+        store.clearDone()
+        store.saveNow()
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertEqual(reloaded.notes.count, 2)
+        XCTAssertEqual(reloaded.archivedNotes.map(\.id), [idA])
+        // ISO-8601 encoding drops sub-second precision, so these compare
+        // to the whole second, like every other date the store persists.
+        XCTAssertEqual(
+            reloaded.notes[0].archivedAt?.timeIntervalSinceReferenceDate ?? 0,
+            store.notes[0].archivedAt?.timeIntervalSinceReferenceDate ?? 0,
+            accuracy: 1.0
+        )
+        XCTAssertEqual(
+            reloaded.notes[0].completedAt?.timeIntervalSinceReferenceDate ?? 0,
+            store.notes[0].completedAt?.timeIntervalSinceReferenceDate ?? 0,
+            accuracy: 1.0
+        )
+        XCTAssertNil(reloaded.notes[1].archivedAt)
+        XCTAssertNil(reloaded.notes[1].completedAt)
+    }
+
+    func testArchivedNoteDoesNotResurrectItsDeletedSectionOnLoad() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        store.toggleDone(ids: [store.notes[0].id])
+        store.clearDone()
+        store.deleteSection("Work")
+        store.saveNow()
+
+        let reloaded = NoteStore(fileURL: fileURL)
+
+        XCTAssertEqual(reloaded.notes.count, 1, "the archived note survives its section being deleted")
+        XCTAssertTrue(reloaded.sections.isEmpty)
     }
 
     // MARK: - Corruption recovery
