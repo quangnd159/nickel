@@ -85,9 +85,6 @@ struct PanelView: View {
     /// the auto-dismiss timer instead of an old one hiding the new toast
     /// early.
     @State private var attachmentToastDismissTask: DispatchWorkItem?
-    /// Mirrors the composer field's first-responder state (see
-    /// `ComposerField.isFocused`), driving the card's focus ring.
-    @State private var isComposerFocused = false
     @Environment(\.controlActiveState) private var controlActiveState
 
     /// Corner radius of the composer card. Larger than a note row's so the
@@ -110,10 +107,11 @@ struct PanelView: View {
     private static let composerTextLeadingInset: CGFloat = 19 + 12
 
     /// The composer's focus ring follows AppKit: only while the field
-    /// actually holds focus and the panel is the key window, and never while
-    /// a drag is targeted (the dashed drop border takes over there).
+    /// actually holds focus and the panel is the key window (both folded into
+    /// `selection.isComposerFocused`), and never while a drag is targeted (the
+    /// dashed drop border takes over there).
     private var showsComposerFocusRing: Bool {
-        isComposerFocused && !isComposerDropTargeted && controlActiveState == .key
+        selection.isComposerFocused && !isComposerDropTargeted
     }
 
     var body: some View {
@@ -744,7 +742,6 @@ struct PanelView: View {
 
                 ComposerField(
                     text: $composerText,
-                    isFocused: $isComposerFocused,
                     onCommit: commitComposer,
                     onDeleteBackwardAtStart: removeStagedSectionIfPresent,
                     onMoveHighlight: moveSuggestionHighlight,
@@ -856,7 +853,7 @@ struct PanelView: View {
     private var suggestionRows: [ComposerSectionSuggestion] {
         ComposerSectionSuggestions.visibleRows(
             text: composerText,
-            isComposerFocused: isComposerFocused && controlActiveState == .key,
+            isComposerFocused: selection.isComposerFocused,
             hasStagedSection: sectionChip.name != nil,
             sections: store.sections,
             dismissedQuery: dismissedSuggestionQuery
@@ -911,6 +908,12 @@ struct PanelView: View {
             }
         }
         .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
+        // Flatten first: every other `panelElevation()` in the panel sits on
+        // a filled `Capsule`/`RoundedRectangle`, so it blurs one silhouette.
+        // Here it's applied to the popup's content, and an unflattened shadow
+        // is cast by each rendered leaf — which drew a blurred copy of every
+        // row's own text behind it.
+        .compositingGroup()
         .panelElevation()
     }
 

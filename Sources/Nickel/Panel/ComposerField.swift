@@ -23,10 +23,6 @@ extension Notification.Name {
 /// first responder — the field keeps focus throughout.
 struct ComposerField: NSViewRepresentable {
     @Binding var text: String
-    /// Mirrors the field's first-responder state, so the composer card
-    /// around it can draw a focus ring (SwiftUI's `@FocusState` doesn't reach
-    /// into an `NSViewRepresentable`).
-    @Binding var isFocused: Bool
     var placeholder: String = "Add a note"
     /// Called when plain Return is pressed. The caller adds the note and
     /// clears the text; focus is deliberately kept so the next note can be
@@ -72,9 +68,6 @@ struct ComposerField: NSViewRepresentable {
             ]
         )
         field.stringValue = text
-        field.onFocusChange = { [weak coordinator = context.coordinator] focused in
-            coordinator?.isFocused.wrappedValue = focused
-        }
         context.coordinator.field = field
         return field
     }
@@ -89,13 +82,11 @@ struct ComposerField: NSViewRepresentable {
         context.coordinator.onMoveHighlight = onMoveHighlight
         context.coordinator.onAcceptSuggestion = onAcceptSuggestion
         context.coordinator.onEscape = onEscape
-        context.coordinator.isFocused = $isFocused
     }
 
     func makeCoordinator() -> Coordinator {
         let coordinator = Coordinator(
             text: $text,
-            isFocused: $isFocused,
             onCommit: onCommit,
             onDeleteBackwardAtStart: onDeleteBackwardAtStart
         )
@@ -107,7 +98,6 @@ struct ComposerField: NSViewRepresentable {
 
     final class Coordinator: NSObject, NSTextFieldDelegate {
         private let text: Binding<String>
-        var isFocused: Binding<Bool>
         var onCommit: () -> Void
         var onDeleteBackwardAtStart: () -> Bool
         var onMoveHighlight: (Int) -> Bool = { _ in false }
@@ -115,9 +105,8 @@ struct ComposerField: NSViewRepresentable {
         var onEscape: () -> Bool = { false }
         weak var field: NSTextField?
 
-        init(text: Binding<String>, isFocused: Binding<Bool>, onCommit: @escaping () -> Void, onDeleteBackwardAtStart: @escaping () -> Bool) {
+        init(text: Binding<String>, onCommit: @escaping () -> Void, onDeleteBackwardAtStart: @escaping () -> Bool) {
             self.text = text
-            self.isFocused = isFocused
             self.onCommit = onCommit
             self.onDeleteBackwardAtStart = onDeleteBackwardAtStart
             super.init()

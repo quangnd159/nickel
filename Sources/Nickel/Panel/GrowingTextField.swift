@@ -8,26 +8,11 @@ import AppKit
 /// Used by `ComposerField` (bordered-free, 5-line cap), which needs a
 /// multiline field editor whose card/container grows and shrinks live as the
 /// user types.
+/// The composer's focus state is deliberately *not* tracked here: this field
+/// can only see focus loss that comes from editing ending, which misses the
+/// panel simply stopping being the key window. `FloatingPanel` watches its own
+/// first responder and key state instead (see `SelectionModel.isComposerFocused`).
 class GrowingTextField: NSTextField {
-    /// Called with `true` when the field takes focus and `false` when it
-    /// gives it up, so the card around it can draw a focus ring. The two
-    /// hooks aren't symmetric on purpose: a focused `NSTextField` hands first
-    /// responder straight to the window's field editor, so `resignFirstResponder`
-    /// is never called on the field itself and `textDidEndEditing` is the
-    /// matching notification for focus loss.
-    var onFocusChange: ((Bool) -> Void)?
-
-    override func becomeFirstResponder() -> Bool {
-        let didBecome = super.becomeFirstResponder()
-        if didBecome { onFocusChange?(true) }
-        return didBecome
-    }
-
-    override func textDidEndEditing(_ notification: Notification) {
-        super.textDidEndEditing(notification)
-        onFocusChange?(false)
-    }
-
     override func layout() {
         super.layout()
         let width = bounds.width

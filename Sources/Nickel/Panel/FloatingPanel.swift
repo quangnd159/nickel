@@ -11,6 +11,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     private var selectionModel: SelectionModel!
     private var panelActions: PanelActions?
 
+    /// Read by `ComposerFocusTests`, which drives a real panel to check that
+    /// the composer's focus flag follows first responder and key state.
+    var selectionModelForTesting: SelectionModel { selectionModel }
+
     /// Bumped on every `toggle()` call; an in-flight show/hide animation
     /// checks this in its completion handler and no-ops if it's stale, so a
     /// rapid double-shift can never have an old hide land after a newer show
@@ -185,6 +189,51 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     func windowWillReturnFieldEditor(_ sender: NSWindow, to client: Any?) -> Any? {
         guard client is GrowingTextField else { return nil }
         return dragRejectingFieldEditor
+    }
+
+    // MARK: - Composer focus
+
+    /// Every first-responder change in this window funnels through here, so
+    /// this is where `SelectionModel.isComposerFocused` is kept true — the
+    /// composer's "#" suggestion popup and its focus ring both follow it.
+    override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
+        let didChange = super.makeFirstResponder(responder)
+        syncComposerFocus()
+        return didChange
+    }
+
+    /// Key state as AppKit reports it through these two overrides, rather than
+    /// read back from `isKeyWindow` at sync time: losing key means the
+    /// composer stops being the focused control even though its field editor
+    /// is still first responder (AppKit doesn't end editing here, so no
+    /// field-level callback fires — these overrides are the only signal), and
+    /// that must not depend on exactly when AppKit flips its own flag.
+    private var isPanelKey = false
+
+    override func becomeKey() {
+        super.becomeKey()
+        isPanelKey = true
+        syncComposerFocus()
+    }
+
+    override func resignKey() {
+        super.resignKey()
+        isPanelKey = false
+        syncComposerFocus()
+    }
+
+    /// The composer is focused when this window is key and its first
+    /// responder is the composer's field editor. Identity against
+    /// `dragRejectingFieldEditor` is exact: `windowWillReturnFieldEditor`
+    /// hands it out only to `GrowingTextField`, which only `ComposerField`
+    /// uses — the search field, header rename, and palette query all get the
+    /// window's standard field editor instead.
+    private func syncComposerFocus() {
+        guard isPanelKey || isKeyWindow, let editor = firstResponder as? NSTextView else {
+            selectionModel?.setComposerFocused(false)
+            return
+        }
+        selectionModel?.setComposerFocused(editor === dragRejectingFieldEditor)
     }
 
     func windowDidMove(_ notification: Notification) {

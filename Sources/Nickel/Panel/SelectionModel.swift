@@ -74,6 +74,25 @@ final class SelectionModel: ObservableObject {
     /// list and ⌫ means "delete permanently".
     @Published private(set) var isShowingLogbook = false
 
+    /// True while the composer's field editor holds first responder *and* the
+    /// panel is the key window — i.e. while the composer is the focused
+    /// control the user is typing into.
+    ///
+    /// Owned here, and written only by `FloatingPanel`, because the window is
+    /// the only place that sees every way focus can be lost. The field itself
+    /// can't: AppKit hands a focused `NSTextField` straight to the window's
+    /// field editor and calls `textDidEndEditing` only when editing actually
+    /// *ends* — when the panel merely stops being key (the user clicks another
+    /// app or another Nickel window), the field editor stays first responder
+    /// and no callback ever fires. `FloatingPanel.makeFirstResponder` /
+    /// `becomeKey` / `resignKey` cover all of it.
+    @Published private(set) var isComposerFocused = false
+
+    func setComposerFocused(_ isFocused: Bool) {
+        guard isComposerFocused != isFocused else { return }
+        isComposerFocused = isFocused
+    }
+
     /// Notes staged for the Logbook's "Delete Permanently" confirmation;
     /// `nil` when nothing is pending. Set by both the row context menu and
     /// ⌫ (which is handled in `FloatingPanel`, hence the shared state rather
