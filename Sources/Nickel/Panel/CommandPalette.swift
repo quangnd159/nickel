@@ -129,7 +129,7 @@ enum PaletteCommand: CaseIterable {
     var title: String {
         switch self {
         case .newSection: return "New Section"
-        case .renameSection: return "Rename Section…"
+        case .renameSection: return "Rename Section"
         case .dissolveSection: return "Dissolve Section"
         case .deleteSection: return "Delete Section…"
         case .clearDone: return "Clear Done"
@@ -162,6 +162,10 @@ struct PaletteContext {
     /// The palette in move mode is a pure destination picker: it lists no
     /// commands at all.
     var isMoveMode: Bool
+    /// The Logbook lists cleared notes, not a live section's, so every
+    /// command that acts on the live list (or that would open the Logbook
+    /// again) is out of scope while it's showing.
+    var isShowingLogbook: Bool
     var activeSection: String?
     /// Mirrors the ⋯ menu's "Clear Done" enablement: done notes in the
     /// active section, or anywhere when showing all.
@@ -172,12 +176,14 @@ struct PaletteContext {
 
     init(
         isMoveMode: Bool = false,
+        isShowingLogbook: Bool = false,
         activeSection: String? = nil,
         hasDoneNotesInScope: Bool = false,
         hasDoneNotesInActiveSection: Bool = false,
         hasNotesInScope: Bool = false
     ) {
         self.isMoveMode = isMoveMode
+        self.isShowingLogbook = isShowingLogbook
         self.activeSection = activeSection
         self.hasDoneNotesInScope = hasDoneNotesInScope
         self.hasDoneNotesInActiveSection = hasDoneNotesInActiveSection
@@ -191,6 +197,18 @@ extension PaletteCommand {
     /// but not run is dead weight in a keyboard flow.
     func isApplicable(in context: PaletteContext) -> Bool {
         guard !context.isMoveMode else { return false }
+        // In the Logbook only the two commands that still mean something
+        // there survive: copying the cleared notes on screen, and Settings.
+        // Everything else acts on the live list, and running it from behind
+        // the Logbook would change something the user can't see (worst case:
+        // "New Section" strands an inline rename on an unrendered header).
+        if context.isShowingLogbook {
+            switch self {
+            case .copyAllAsList: return context.hasNotesInScope
+            case .settings: return true
+            default: return false
+            }
+        }
         switch self {
         case .newSection, .openLogbook, .settings:
             return true

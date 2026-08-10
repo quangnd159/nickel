@@ -199,10 +199,13 @@ struct PanelView: View {
             ),
             presenting: selection.sectionDeleteConfirmation
         ) { confirmation in
+            // The recoverable choice is the default one, so Return can never
+            // fire the destructive button.
             Button("Move Notes to Logbook") {
                 store.archiveSection(confirmation.name)
                 selection.sectionDeleteConfirmation = nil
             }
+            .keyboardShortcut(.defaultAction)
             Button("Delete Notes", role: .destructive) {
                 store.deleteSection(confirmation.name)
                 selection.sectionDeleteConfirmation = nil
@@ -211,9 +214,11 @@ struct PanelView: View {
                 selection.sectionDeleteConfirmation = nil
             }
         } message: { confirmation in
-            Text("Delete \"\(confirmation.name)\"? Its \(confirmation.noteCount) \(confirmation.noteCount == 1 ? "note" : "notes") can move to the Logbook or be deleted.")
+            Text(confirmation.noteCount == 1
+                 ? "“\(confirmation.name)” has 1 note. It can move to the Logbook or be deleted."
+                 : "“\(confirmation.name)” has \(confirmation.noteCount) notes. They can move to the Logbook or be deleted.")
         }
-        // The Logbook's "Delete Permanently…" (context menu or ⌫). Staged on
+        // The Logbook's "Delete Permanently" (context menu or ⌫). Staged on
         // `SelectionModel` rather than local `@State` because ⌫ is handled in
         // `FloatingPanel`, which can't reach this view's state.
         .confirmationDialog(
@@ -241,7 +246,7 @@ struct PanelView: View {
     /// (⌘K/⌘/ both toggle); opening either one always replaces the other, so
     /// only one is ever presented at a time.
     private func toggleOverlay(_ overlay: PanelOverlay) {
-        withAnimation(.easeOut(duration: 0.12)) {
+        withAnimation(.panelOverlay) {
             selection.presentedOverlay = (selection.presentedOverlay == overlay) ? nil : overlay
         }
     }
@@ -255,7 +260,7 @@ struct PanelView: View {
     /// with a since-changed selection as "opening a different overlay"
     /// instead of closing the one that's open.
     private func toggleSectionSwitcher() {
-        withAnimation(.easeOut(duration: 0.12)) {
+        withAnimation(.panelOverlay) {
             if case .sectionSwitcher = selection.presentedOverlay {
                 selection.presentedOverlay = nil
             } else {
@@ -295,24 +300,40 @@ struct PanelView: View {
             )
 
             Menu {
+                // Picking a destination leaves the Logbook, exactly as the ⌘K
+                // palette's destination rows do (see `SectionSwitcher.commit`)
+                // — switching the section behind the Logbook would otherwise
+                // change a list the user can't see.
                 Section("Section") {
                     Toggle("Show All", isOn: Binding(
-                        get: { store.activeSection == nil },
-                        set: { isOn in if isOn { store.setActiveSection(nil) } }
+                        get: { store.activeSection == nil && !selection.isShowingLogbook },
+                        set: { isOn in
+                            guard isOn else { return }
+                            selection.setShowingLogbook(false)
+                            store.setActiveSection(nil)
+                        }
                     ))
 
                     ForEach(store.sections, id: \.self) { sectionName in
                         Toggle(sectionName, isOn: Binding(
-                            get: { store.activeSection == sectionName },
-                            set: { isOn in if isOn { store.setActiveSection(sectionName) } }
+                            get: { store.activeSection == sectionName && !selection.isShowingLogbook },
+                            set: { isOn in
+                                guard isOn else { return }
+                                selection.setShowingLogbook(false)
+                                store.setActiveSection(sectionName)
+                            }
                         ))
                     }
 
+                    // The rest of this section acts on the live list, so it's
+                    // disabled (menu convention — the items stay in place)
+                    // while the Logbook is showing.
                     Button("New Section") { actions.createAndRenameNewSection() }
+                        .disabled(selection.isShowingLogbook)
 
                     Button("Rename Section") { actions.renameActiveSection() }
                     .keyboardShortcut("r", modifiers: [.command, .shift])
-                    .disabled(store.activeSection == nil)
+                    .disabled(store.activeSection == nil || selection.isShowingLogbook)
                 }
 
                 Divider()
@@ -320,11 +341,15 @@ struct PanelView: View {
                 Button("Clear Done") {
                     store.clearDone()
                 }
-                .disabled(!hasDoneNotesInScope)
+                .disabled(!hasDoneNotesInScope || selection.isShowingLogbook)
 
-                Button("Logbook") {
-                    selection.setShowingLogbook(true)
-                }
+                // A toggle rather than an "Open Logbook" button, so the item
+                // shows which view the panel is in (like the Section toggles
+                // above) and doubles as the way back out.
+                Toggle("Logbook", isOn: Binding(
+                    get: { selection.isShowingLogbook },
+                    set: { selection.setShowingLogbook($0) }
+                ))
 
                 Button("Copy All as List") {
                     actions.copyAllAsList()
@@ -831,6 +856,7 @@ struct PanelView: View {
     private var suggestionRows: [ComposerSectionSuggestion] {
         ComposerSectionSuggestions.visibleRows(
             text: composerText,
+            isComposerFocused: isComposerFocused && controlActiveState == .key,
             hasStagedSection: sectionChip.name != nil,
             sections: store.sections,
             dismissedQuery: dismissedSuggestionQuery
@@ -854,12 +880,19 @@ struct PanelView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        suggestionRow(row, isHighlighted: index == highlighted)
-                            .id(row.id)
-                            .onTapGesture { acceptSuggestion(row, refocusingComposer: true) }
-                            .onHover { isHovering in
-                                if isHovering { suggestionHighlight = index }
-                            }
+                        // A real `Button` (not a tap gesture) so each row is
+                        // a control to VoiceOver; `.plain` keeps the popup's
+                        // own row styling intact.
+                        Button {
+                            acceptSuggestion(row, refocusingComposer: true)
+                        } label: {
+                            suggestionRow(row, isHighlighted: index == highlighted)
+                        }
+                        .buttonStyle(.plain)
+                        .id(row.id)
+                        .onHover { isHovering in
+                            if isHovering { suggestionHighlight = index }
+                        }
                     }
                 }
                 .padding(6)
@@ -891,9 +924,11 @@ struct PanelView: View {
         return HStack(spacing: 8) {
             Text(suggestionLabel(row))
                 .font(.system(size: 13))
-                .foregroundStyle(usesAccentFill ? Color.white : Color.primary)
+                .foregroundStyle(usesAccentFill ? Color(nsColor: .alternateSelectedControlTextColor) : Color.primary)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                // Tail, like the ⌘K palette: a list of section names reads
+                // left to right, and their distinguishing start must survive.
+                .truncationMode(.tail)
 
             Spacer(minLength: 0)
         }
@@ -1317,6 +1352,10 @@ struct PanelView: View {
 
         case .sectionOnly(let section):
             store.createSection(named: section)
+            // The field can still hold whitespace here (the trim above is
+            // what made this a chip-only commit), so clear it too — otherwise
+            // the next note starts with leftover blanks.
+            composerText = ""
             sectionChip.remove()
 
         case .addNote(let section):
@@ -1375,4 +1414,9 @@ struct PanelView: View {
 /// list moves as one system.
 extension Animation {
     static let noteRowSpring = Animation.spring(response: 0.3, dampingFraction: 0.8)
+
+    /// The one motion every panel overlay (⌘K palette, ⌘/ shortcuts card)
+    /// appears and disappears with, wherever it's dismissed from — the
+    /// toggle, a click on the dim, or Esc handled up in `FloatingPanel`.
+    static let panelOverlay = Animation.easeOut(duration: 0.12)
 }

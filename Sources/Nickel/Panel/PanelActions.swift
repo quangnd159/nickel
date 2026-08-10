@@ -23,8 +23,13 @@ final class PanelActions: ObservableObject {
         notes(for: selection.visibleOrder)
     }
 
+    /// Resolves ids against *every* note, live or archived, rather than just
+    /// `store.activeNotes`: the ids always come from `selection.visibleOrder`,
+    /// which is already scoped to whichever list is on screen, and the Logbook
+    /// shows archived notes — copying has to work there too (see the
+    /// `isShowingLogbook` note below).
     private func notes(for ids: [UUID]) -> [Note] {
-        let byID = Dictionary(store.activeNotes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        let byID = Dictionary(store.notes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         return ids.compactMap { byID[$0] }
     }
 
@@ -46,22 +51,22 @@ final class PanelActions: ObservableObject {
 
     // MARK: - Copy
 
-    func copy() {
+    func copy(pasteboard: NSPasteboard = .general) {
         let notes = selectedNotes
-        guard let layout = PasteboardWriter.copy(notes: notes, store: store) else { return }
-        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout)
+        guard let layout = PasteboardWriter.copy(notes: notes, store: store, pasteboard: pasteboard) else { return }
+        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout, pasteboard: pasteboard)
     }
 
-    func copyAsList() {
+    func copyAsList(pasteboard: NSPasteboard = .general) {
         let notes = selectedNotes
-        guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store) else { return }
-        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout)
+        guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store, pasteboard: pasteboard) else { return }
+        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout, pasteboard: pasteboard)
     }
 
-    func copyAllAsList() {
+    func copyAllAsList(pasteboard: NSPasteboard = .general) {
         let notes = allVisibleNotes
-        guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store) else { return }
-        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout)
+        guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store, pasteboard: pasteboard) else { return }
+        SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout, pasteboard: pasteboard)
     }
 
     // MARK: - Done / edit / merge / delete
@@ -81,7 +86,7 @@ final class PanelActions: ObservableObject {
     /// `.keyboardShortcut` doesn't register globally on macOS, so the panel
     /// needs its own key handling that calls the same method).
     func toggleExpanded() {
-        guard !selection.selectedIDs.isEmpty else { return }
+        guard !isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
         selection.toggleExpanded(ids: selection.selectedIDs)
     }
 
@@ -192,7 +197,7 @@ final class PanelActions: ObservableObject {
         store.restore(ids: ids)
     }
 
-    /// Stages the "Delete Permanently…" confirmation; `confirmPermanentDelete`
+    /// Stages the "Delete Permanently" confirmation; `confirmPermanentDelete`
     /// is what actually deletes. Both the row context menu and ⌫ come through
     /// here, so the confirmation can never be bypassed.
     func requestPermanentDelete(ids: Set<UUID>) {

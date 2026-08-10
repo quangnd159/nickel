@@ -220,6 +220,79 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertEqual(store.activeSection, "Work")
     }
 
+    func testRenameSectionFollowsArchivedNotesSoPutBackLandsInTheRenamedSection() {
+        // Deliberate: the section still exists, just under a new name, so a
+        // note put back from the Logbook belongs in it (see `renameSection`).
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+
+        store.renameSection(from: "Work", to: "Projects")
+
+        XCTAssertEqual(store.notes[0].listName, "Projects")
+
+        store.restore(ids: [id])
+        XCTAssertEqual(store.notes[0].listName, "Projects", "the section is known, so nothing ungroups it")
+    }
+
+    // MARK: - dissolveSection
+
+    func testDissolveSectionUngroupsItsNotesAndRemovesIt() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+
+        store.dissolveSection("Work")
+
+        XCTAssertTrue(store.sections.isEmpty)
+        XCTAssertNil(store.activeSection)
+        XCTAssertEqual(store.notes.count, 2, "dissolving keeps the notes; only the grouping goes")
+        XCTAssertTrue(store.notes.allSatisfy { $0.listName == nil })
+    }
+
+    func testDissolveSectionLeavesOtherSectionsAndTheirNotesAlone() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        store.createSection(named: "Home")
+        store.add(text: "b", sourceApp: nil)
+
+        store.dissolveSection("Work")
+
+        XCTAssertEqual(store.sections, ["Home"])
+        XCTAssertEqual(store.activeSection, "Home", "a different section was active, so it stays")
+        XCTAssertEqual(store.notes.first(where: { $0.text == "b" })?.listName, "Home")
+    }
+
+    func testDissolveSectionKeepsTheLogbooksRecordOfWhereANoteCameFrom() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        store.clearDone()
+
+        store.dissolveSection("Work")
+
+        XCTAssertEqual(store.notes[0].listName, "Work", "the archived note keeps the section it was cleared from")
+
+        // The section is gone by the time it's put back, so it comes back
+        // ungrouped rather than resurrecting the section.
+        store.restore(ids: [id])
+        XCTAssertNil(store.notes[0].listName)
+        XCTAssertTrue(store.sections.isEmpty)
+    }
+
+    func testDissolveUnknownSectionIsANoOp() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+
+        store.dissolveSection("Nope")
+
+        XCTAssertEqual(store.sections, ["Work"])
+        XCTAssertEqual(store.notes[0].listName, "Work")
+    }
+
     // MARK: - createSection
 
     func testCreateSectionTrimsAndActivates() {
@@ -294,6 +367,27 @@ final class NoteStoreTests: XCTestCase {
 
         XCTAssertEqual(store.activeNotes.map(\.id), [idB])
         XCTAssertEqual(store.archivedNotes.map(\.id), [idA])
+    }
+
+    func testClearDoneInSectionLeavesAlreadyArchivedNotesAlone() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        let idA = store.notes[0].id
+        store.toggleDone(ids: [idA])
+        store.clearDone(in: "Work")
+        let firstStamp = store.notes[0].archivedAt
+
+        // A second done note in the same section, cleared later: the first
+        // note's original stamp must survive (the Logbook groups by the day
+        // a note was cleared, so re-stamping would move it).
+        store.add(text: "b", sourceApp: nil)
+        let idB = store.notes[1].id
+        store.toggleDone(ids: [idB])
+        store.clearDone(in: "Work")
+
+        XCTAssertEqual(store.notes[0].archivedAt, firstStamp)
+        XCTAssertNotNil(store.notes[1].archivedAt)
+        XCTAssertNotEqual(store.notes[1].archivedAt, firstStamp)
     }
 
     func testClearDoneArchivesRatherThanDeletingAndKeepsAttachments() throws {
@@ -397,6 +491,22 @@ final class NoteStoreTests: XCTestCase {
 
         XCTAssertEqual(store.activeNotes.map(\.text), ["c"])
         XCTAssertEqual(store.archivedNotes.map(\.text), ["b", "a"])
+    }
+
+    func testArchivedNotesClearedInOneBatchAreOrderedNewestCreatedFirst() {
+        // A batch clear stamps every note with the same `archivedAt`, so the
+        // order has to come from `createdAt` rather than from `sorted`'s
+        // (unspecified) stability.
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.add(text: "c", sourceApp: nil)
+        store.toggleDone(ids: Set(store.notes.map(\.id)))
+
+        store.clearDone()
+
+        let stamps = Set(store.archivedNotes.compactMap(\.archivedAt))
+        XCTAssertEqual(stamps.count, 1, "a batch clear shares one stamp — that's what makes the tiebreak matter")
+        XCTAssertEqual(store.archivedNotes.map(\.text), ["c", "b", "a"])
     }
 
     func testRestoreClearsArchivedAtAndKeepsDoneState() {

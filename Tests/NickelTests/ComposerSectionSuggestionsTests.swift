@@ -111,6 +111,7 @@ final class ComposerSectionSuggestionsTests: XCTestCase {
     func testVisibleRowsAreEmptyForANormalNote() {
         XCTAssertTrue(ComposerSectionSuggestions.visibleRows(
             text: "buy milk",
+            isComposerFocused: true,
             hasStagedSection: false,
             sections: sections,
             dismissedQuery: nil
@@ -120,6 +121,7 @@ final class ComposerSectionSuggestionsTests: XCTestCase {
     func testVisibleRowsAreEmptyWithAChipStaged() {
         XCTAssertTrue(ComposerSectionSuggestions.visibleRows(
             text: "#tag",
+            isComposerFocused: true,
             hasStagedSection: true,
             sections: sections,
             dismissedQuery: nil
@@ -130,6 +132,34 @@ final class ComposerSectionSuggestionsTests: XCTestCase {
         XCTAssertEqual(
             ComposerSectionSuggestions.visibleRows(
                 text: "#Err",
+                isComposerFocused: true,
+                hasStagedSection: false,
+                sections: sections,
+                dismissedQuery: nil
+            ),
+            [.existing("Errands"), .create("Err")]
+        )
+    }
+
+    func testVisibleRowsAreEmptyWhileTheComposerHasNoFocus() {
+        // Clicking the note list (or the panel losing key) resigns the
+        // composer's focus; the popup belongs to that field, so it goes with
+        // it — even though the "#" text is still sitting there.
+        XCTAssertTrue(ComposerSectionSuggestions.visibleRows(
+            text: "#Err",
+            isComposerFocused: false,
+            hasStagedSection: false,
+            sections: sections,
+            dismissedQuery: nil
+        ).isEmpty)
+    }
+
+    func testVisibleRowsComeBackWhenTheComposerRegainsFocus() {
+        // Nothing about the dismissal is remembered: focus alone decides.
+        XCTAssertEqual(
+            ComposerSectionSuggestions.visibleRows(
+                text: "#Err",
+                isComposerFocused: true,
                 hasStagedSection: false,
                 sections: sections,
                 dismissedQuery: nil
@@ -151,6 +181,7 @@ final class ComposerSectionSuggestionsTests: XCTestCase {
     func testDismissingABareHashKeepsAHashtagTypeable() {
         XCTAssertTrue(ComposerSectionSuggestions.visibleRows(
             text: "#hashtag",
+            isComposerFocused: true,
             hasStagedSection: false,
             sections: sections,
             dismissedQuery: ""
@@ -162,6 +193,7 @@ final class ComposerSectionSuggestionsTests: XCTestCase {
         XCTAssertEqual(
             ComposerSectionSuggestions.visibleRows(
                 text: "#Er",
+                isComposerFocused: true,
                 hasStagedSection: false,
                 sections: sections,
                 dismissedQuery: "Err"

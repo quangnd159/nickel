@@ -77,10 +77,19 @@ final class NoteStore: ObservableObject {
     }
 
     /// The Logbook's contents: cleared notes, most recently cleared first.
+    ///
+    /// A batch clear stamps every note in it with one shared `archivedAt`, so
+    /// the tie is broken by `createdAt` (newest first, matching the primary
+    /// order) rather than left to `sorted`, whose stability is unspecified.
     var archivedNotes: [Note] {
         notes
             .filter { $0.archivedAt != nil }
-            .sorted { ($0.archivedAt ?? .distantPast) > ($1.archivedAt ?? .distantPast) }
+            .sorted { lhs, rhs in
+                let lhsArchived = lhs.archivedAt ?? .distantPast
+                let rhsArchived = rhs.archivedAt ?? .distantPast
+                if lhsArchived != rhsArchived { return lhsArchived > rhsArchived }
+                return lhs.createdAt > rhs.createdAt
+            }
     }
 
     // MARK: - Mutations
@@ -235,6 +244,11 @@ final class NoteStore: ObservableObject {
     /// section, the two merge under that existing section's casing. Trims
     /// whitespace; a blank result after trimming is a no-op (Finder leaves
     /// the name unchanged rather than allowing an empty folder name).
+    ///
+    /// Archived notes are renamed too, deliberately — unlike `dissolveSection`
+    /// and `deleteSection`, which leave the Logbook's record alone. The
+    /// section still exists here, just under a new name, so a note put back
+    /// from the Logbook has to land in it rather than come back ungrouped.
     func renameSection(from oldName: String, to newName: String) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed != oldName else { return }

@@ -90,14 +90,23 @@ enum ComposerSectionSuggestions {
     }
 
     /// The rows to show right now — empty when the popup shouldn't be open at
-    /// all (no "#" query, dismissed with Esc, or nothing to suggest).
+    /// all (the composer doesn't have focus, no "#" query, dismissed with Esc,
+    /// or nothing to suggest).
+    ///
+    /// `isComposerFocused` is what every native completion list does: the
+    /// popup belongs to the field, so it goes away the moment the field stops
+    /// being the focused control — clicking the note list, or the panel
+    /// ceasing to be the key window. The caller folds the window's key state
+    /// into this flag.
     static func visibleRows(
         text: String,
+        isComposerFocused: Bool,
         hasStagedSection: Bool,
         sections: [String],
         dismissedQuery: String?
     ) -> [ComposerSectionSuggestion] {
-        guard let query = query(in: text, hasStagedSection: hasStagedSection),
+        guard isComposerFocused,
+              let query = query(in: text, hasStagedSection: hasStagedSection),
               !isDismissed(query: query, dismissedQuery: dismissedQuery) else { return [] }
         return rows(query: query, sections: sections)
     }

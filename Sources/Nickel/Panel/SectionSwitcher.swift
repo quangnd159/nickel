@@ -55,6 +55,9 @@ struct SectionSwitcher: View {
                 Color.black.opacity(0.15)
                     .contentShape(Rectangle())
                     .onTapGesture { dismiss() }
+                    // The palette takes over the panel while it's up, so
+                    // VoiceOver shouldn't wander into the list behind it.
+                    .accessibilityAddTraits(.isModal)
 
                 card
                     .frame(width: min(geometry.size.width - 48, 280))
@@ -103,11 +106,17 @@ struct SectionSwitcher: View {
                                         .padding(.vertical, 3)
                                 }
 
-                                resultRow(result, isHighlighted: index == highlightedIndex)
-                                    .onTapGesture { commit(result) }
-                                    .onHover { isHovering in
-                                        if isHovering { highlightedIndex = index }
-                                    }
+                                // A real `Button` (not a tap gesture) so the
+                                // row is a control to VoiceOver and to any
+                                // other assistive technology; `.plain` keeps
+                                // the palette's own row styling intact.
+                                Button { commit(result) } label: {
+                                    resultRow(result, isHighlighted: index == highlightedIndex)
+                                }
+                                .buttonStyle(.plain)
+                                .onHover { isHovering in
+                                    if isHovering { highlightedIndex = index }
+                                }
                             }
                             .id(result.id)
                         }
@@ -130,9 +139,11 @@ struct SectionSwitcher: View {
     }
 
     private func resultRow(_ result: Result, isHighlighted: Bool) -> some View {
-        // White labels only go with the emphasized (accent) fill; the
-        // unemphasized gray needs the normal label colors to stay legible.
+        // The selected-row label color only goes with the emphasized (accent)
+        // fill; the unemphasized gray needs the normal label colors to stay
+        // legible.
         let usesAccentFill = isHighlighted && isEmphasized
+        let selectedLabel = Color(nsColor: .alternateSelectedControlTextColor)
 
         return HStack(spacing: 8) {
             // Commands carry a small symbol; destinations don't. That, plus
@@ -141,13 +152,13 @@ struct SectionSwitcher: View {
             if case .command(let command) = result {
                 Image(systemName: command.symbolName)
                     .font(.system(size: 11))
-                    .foregroundStyle(usesAccentFill ? Color.white : Color.secondary)
+                    .foregroundStyle(usesAccentFill ? selectedLabel : Color.secondary)
                     .frame(width: 14)
             }
 
             Text(label(for: result))
                 .font(.system(size: 13))
-                .foregroundStyle(usesAccentFill ? Color.white : Color.primary)
+                .foregroundStyle(usesAccentFill ? selectedLabel : Color.primary)
                 .lineLimit(1)
 
             Spacer()
@@ -155,7 +166,7 @@ struct SectionSwitcher: View {
             if isActive(result) {
                 Image(systemName: "checkmark")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(usesAccentFill ? Color.white : Color.secondary)
+                    .foregroundStyle(usesAccentFill ? selectedLabel : Color.secondary)
             }
         }
         .padding(.horizontal, 8)
@@ -243,6 +254,7 @@ struct SectionSwitcher: View {
         let activeSection = store.activeSection
         return PaletteContext(
             isMoveMode: move,
+            isShowingLogbook: selection.isShowingLogbook,
             activeSection: activeSection,
             hasDoneNotesInScope: activeSection.map(hasDoneNotes(inSection:)) ?? store.activeNotes.contains(where: \.isDone),
             hasDoneNotesInActiveSection: activeSection.map(hasDoneNotes(inSection:)) ?? false,
@@ -366,8 +378,12 @@ struct SectionSwitcher: View {
         }
     }
 
+    /// Closes the palette in the same animation `PanelView.toggleOverlay`
+    /// opens it with, so Esc, a click on the dim, and ⌘K all look identical.
     private func dismiss() {
-        selection.presentedOverlay = nil
+        withAnimation(.panelOverlay) {
+            selection.presentedOverlay = nil
+        }
     }
 }
 

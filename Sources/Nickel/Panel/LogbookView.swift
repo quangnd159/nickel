@@ -74,17 +74,14 @@ struct LogbookView: View {
         LogbookBackButton(action: { selection.setShowingLogbook(false) })
     }
 
+    /// An empty Logbook says one thing, not the same thing twice: the footer
+    /// below explains that nothing is purged, which is only worth saying once
+    /// there's something in here to keep.
     private var emptyState: some View {
-        VStack(spacing: 6) {
-            Text("Cleared notes appear here")
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
-
-            Text("Cleared notes stay here until you delete them.")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-        }
-        .multilineTextAlignment(.center)
+        Text("Cleared notes appear here")
+            .font(.system(size: 12))
+            .foregroundStyle(.tertiary)
+            .multilineTextAlignment(.center)
     }
 
     /// macOS-Notes-"Recently Deleted"-style footer: explains that the
@@ -187,7 +184,7 @@ private struct LogbookBackButton: View {
 
 /// One Logbook row: the note card's look without any of its editing — the
 /// checkbox is a static indicator, double-click does nothing, and the
-/// context menu offers only "Put Back" and "Delete Permanently…".
+/// context menu offers only "Put Back" and "Delete Permanently".
 private struct LogbookRow: View {
     let note: Note
 
@@ -239,7 +236,13 @@ private struct LogbookRow: View {
                 }
             }
         }
+        // Same pattern as `NoteRow.noteRowAccessibility`: one combined
+        // element, the done state as its value, and the row's two menu items
+        // as named actions (hover/right-click reach neither by keyboard).
         .accessibilityElement(children: .combine)
+        .accessibilityValue(note.isDone ? "Done" : "Not Done")
+        .accessibilityAction(named: Text("Put Back")) { actions.restore(ids: targetIDs) }
+        .accessibilityAction(named: Text("Delete Permanently")) { actions.requestPermanentDelete(ids: targetIDs) }
         .padding(.horizontal, 14)
         .padding(.vertical, 13)
         // Flat, not a card: no fill at all, unlike `NoteRow`'s opaque
@@ -265,7 +268,7 @@ private struct LogbookRow: View {
 
             Divider()
 
-            Button("Delete Permanently…", role: .destructive) {
+            Button("Delete Permanently", role: .destructive) {
                 actions.requestPermanentDelete(ids: targetIDs)
             }
         }

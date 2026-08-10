@@ -188,6 +188,38 @@ final class CommandPaletteTests: XCTestCase {
         ])
     }
 
+    // MARK: - Command visibility in the Logbook
+
+    func testLogbookListsOnlyCopyAllAsListAndSettings() {
+        // Every other command acts on the live list behind the Logbook.
+        let context = PaletteContext(
+            isShowingLogbook: true,
+            activeSection: "Work",
+            hasDoneNotesInScope: true,
+            hasDoneNotesInActiveSection: true,
+            hasNotesInScope: true
+        )
+        XCTAssertEqual(PaletteCommand.applicable(in: context), [.copyAllAsList, .settings])
+    }
+
+    func testLogbookHidesNewSectionSoItCantStrandAnInlineRename() {
+        // The worst of the live-list commands: it creates and activates a
+        // section, then starts an inline rename on a header the Logbook
+        // isn't rendering.
+        let context = PaletteContext(isShowingLogbook: true, hasNotesInScope: true)
+        XCTAssertFalse(PaletteCommand.applicable(in: context).contains(.newSection))
+    }
+
+    func testLogbookHidesOpenLogbookSinceItsAlreadyOpen() {
+        let context = PaletteContext(isShowingLogbook: true, hasNotesInScope: true)
+        XCTAssertFalse(PaletteCommand.applicable(in: context).contains(.openLogbook))
+    }
+
+    func testEmptyLogbookHasNothingToCopy() {
+        let context = PaletteContext(isShowingLogbook: true)
+        XCTAssertEqual(PaletteCommand.applicable(in: context), [.settings])
+    }
+
     func testShowAllListsOnlyTheCommandsThatDontNeedASection() {
         let context = PaletteContext(hasDoneNotesInScope: true, hasNotesInScope: true)
         XCTAssertEqual(PaletteCommand.applicable(in: context), [

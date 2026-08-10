@@ -479,7 +479,11 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// `mouseDown`.
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.keyCode == 53, selectionModel.presentedOverlay != nil {
-            selectionModel.presentedOverlay = nil
+            // Same animation the overlay opened with (`PanelView.toggleOverlay`),
+            // so Esc and ⌘K close it identically.
+            withAnimation(.panelOverlay) {
+                selectionModel.presentedOverlay = nil
+            }
             return
         }
         super.sendEvent(event)
@@ -526,9 +530,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         case .moveToLogbook:
             actions.moveToLogbook()
         case .escape:
-            if actions.selection.isShowingLogbook {
-                // Esc leaves the Logbook (which also clears its selection),
-                // the same way it backs out of any other take-over view.
+            if actions.selection.isShowingLogbook, actions.selection.selectedIDs.isEmpty {
+                // Esc peels one layer at a time everywhere else in the panel,
+                // so in the Logbook it clears the selection first (the branch
+                // below) and only then backs out of the view itself.
                 actions.selection.setShowingLogbook(false)
             } else if !actions.selection.selectedIDs.isEmpty {
                 actions.selection.clear()

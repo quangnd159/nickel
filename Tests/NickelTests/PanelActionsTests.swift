@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Nickel
 
@@ -334,6 +335,45 @@ final class PanelActionsTests: XCTestCase {
         XCTAssertNil(selection.editingID)
         XCTAssertEqual(store.notes.count, 2)
         XCTAssertTrue(store.notes.allSatisfy { $0.listName == nil })
+    }
+
+    func testCopyingInTheLogbookPutsTheArchivedNoteOnThePasteboard() {
+        store.add(text: "archived note", sourceApp: nil)
+        _ = archiveSingleNoteAndShowLogbook()
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copy(pasteboard: pasteboard)
+
+        XCTAssertEqual(pasteboard.string(forType: .string), "archived note")
+    }
+
+    func testCopyAllAsListInTheLogbookCopiesEveryVisibleArchivedNote() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.toggleDone(ids: Set(store.notes.map(\.id)))
+        store.clearDone()
+        selection.setShowingLogbook(true)
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copyAllAsList(pasteboard: pasteboard)
+
+        let copied = pasteboard.string(forType: .string)
+        XCTAssertEqual(copied?.contains("- a"), true)
+        XCTAssertEqual(copied?.contains("- b"), true)
+    }
+
+    func testToggleExpandedIsANoOpInTheLogbook() {
+        // Expansion state outlives the Logbook, so an expanded id staged here
+        // would surface on a note the moment it's put back.
+        store.add(text: "a", sourceApp: nil)
+        let id = archiveSingleNoteAndShowLogbook()
+
+        actions.toggleExpanded()
+
+        XCTAssertTrue(selection.expandedIDs.isEmpty)
+        XCTAssertEqual(selection.selectedIDs, [id], "no-op: the selection itself is untouched")
     }
 
     func testRestorePutsTheNoteBackInTheList() {

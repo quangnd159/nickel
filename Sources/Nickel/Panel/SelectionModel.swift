@@ -74,7 +74,7 @@ final class SelectionModel: ObservableObject {
     /// list and ⌫ means "delete permanently".
     @Published private(set) var isShowingLogbook = false
 
-    /// Notes staged for the Logbook's "Delete Permanently…" confirmation;
+    /// Notes staged for the Logbook's "Delete Permanently" confirmation;
     /// `nil` when nothing is pending. Set by both the row context menu and
     /// ⌫ (which is handled in `FloatingPanel`, hence the shared state rather
     /// than `PanelView` `@State`), read by `PanelView`'s confirmation dialog.
