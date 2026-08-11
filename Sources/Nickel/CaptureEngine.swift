@@ -7,8 +7,15 @@ enum CaptureEngine {
         NSWorkspace.shared.frontmostApplication?.localizedName
     }
 
-    /// Captures the current text selection from the frontmost app. Tries the
-    /// Accessibility API first, then falls back to a ⌘C-via-pasteboard snapshot.
+    /// Captures the current text selection from the frontmost app. Reads the
+    /// Accessibility selected text first (instant, no side effects) as a
+    /// reference value, then always runs the ⌘C-via-pasteboard capture, which
+    /// preserves formatting as Markdown. The pasteboard result is the primary
+    /// result when it plausibly matches the Accessibility text (see
+    /// `pasteboardResultMatchesAXText`); otherwise this falls back to the
+    /// Accessibility text, guarding against a Cmd-C that copied something
+    /// other than the visible selection (an app that rebinds Cmd-C, Finder
+    /// copying file names, etc.).
     /// Blocking; call off the main thread.
     static func captureSelectedText() -> String? {
         guard let frontmost = NSWorkspace.shared.frontmostApplication,
@@ -16,15 +23,52 @@ enum CaptureEngine {
             return nil
         }
 
-        if let text = captureViaAccessibility(), !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            debugLog("CaptureEngine: AX path, length=\(trimmed.count)")
-            return trimmed
+        let axText = captureViaAccessibility()?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pasteboardText = captureViaPasteboard()
+
+        if let pasteboardText, let axText, !axText.isEmpty {
+            if pasteboardResultMatchesAXText(pasteboardText, axText: axText) {
+                debugLog("CaptureEngine: pasteboard primary, length=\(pasteboardText.count)")
+                return pasteboardText
+            }
+            debugLog("CaptureEngine: AX fallback (mismatch), length=\(axText.count)")
+            return axText
         }
 
-        let text = captureViaPasteboard()
-        debugLog("CaptureEngine: pasteboard path, length=\(text.map { String($0.count) } ?? "nil")")
-        return text
+        if let pasteboardText {
+            debugLog("CaptureEngine: pasteboard primary, length=\(pasteboardText.count)")
+            return pasteboardText
+        }
+
+        if let axText, !axText.isEmpty {
+            debugLog("CaptureEngine: AX fallback (no pasteboard), length=\(axText.count)")
+            return axText
+        }
+
+        debugLog("CaptureEngine: no capture available")
+        return nil
+    }
+
+    /// Heuristic check that a Markdown pasteboard capture corresponds to the
+    /// Accessibility-reported selection, not an unrelated Cmd-C result.
+    /// Strips whitespace and Markdown marker characters from both strings and
+    /// accepts a match if one sanitized string contains the other, which
+    /// tolerates Markdown decoration (bold/italic markers, heading hashes,
+    /// list markers, link URLs) without requiring exact equality.
+    static func pasteboardResultMatchesAXText(_ markdown: String, axText: String) -> Bool {
+        let markers = CharacterSet(charactersIn: "*_`#>[]()-.0123456789")
+        func sanitize(_ text: String) -> String {
+            text.unicodeScalars
+                .filter { !CharacterSet.whitespacesAndNewlines.contains($0) && !markers.contains($0) }
+                .map(String.init)
+                .joined()
+        }
+
+        let sanitizedMarkdown = sanitize(markdown)
+        let sanitizedAX = sanitize(axText)
+        guard !sanitizedMarkdown.isEmpty, !sanitizedAX.isEmpty else { return false }
+
+        return sanitizedMarkdown.contains(sanitizedAX) || sanitizedAX.contains(sanitizedMarkdown)
     }
 
     private static func captureViaAccessibility() -> String? {
