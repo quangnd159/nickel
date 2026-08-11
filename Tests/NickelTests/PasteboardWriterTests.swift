@@ -248,12 +248,26 @@ final class PasteboardWriterTests: XCTestCase {
     func testCopyAsListCombinedTextUnchanged() {
         store.add(text: "first", sourceApp: nil)
         store.add(text: "second", sourceApp: nil)
+        store.add(text: "third", sourceApp: nil)
 
         PasteboardWriter.copyAsList(notes: store.notes, store: store, pasteboard: pasteboard)
 
         let items = pasteboard.pasteboardItems!
         XCTAssertEqual(items.count, 1)
-        XCTAssertEqual(items[0].string(forType: .string), "- first\n- second")
+        XCTAssertEqual(items[0].string(forType: .string), "1. first\n2. second\n3. third")
+    }
+
+    /// Wrapped/internal newlines within a note's text must stay part of the
+    /// same numbered item, indented three spaces so they align under a
+    /// "1. " marker when pasted as Markdown.
+    func testCopyAsListIndentsInternalNewlinesUnderNumberMarker() {
+        store.add(text: "first line\nsecond line", sourceApp: nil)
+        store.add(text: "second", sourceApp: nil)
+
+        PasteboardWriter.copyAsList(notes: store.notes, store: store, pasteboard: pasteboard)
+
+        let items = pasteboard.pasteboardItems!
+        XCTAssertEqual(items[0].string(forType: .string), "1. first line\n   second line\n2. second")
     }
 
     // MARK: - repeated writes of one layout
@@ -344,8 +358,11 @@ final class PasteboardWriterTests: XCTestCase {
         store.add(text: "second", sourceApp: nil)
 
         let layout = try XCTUnwrap(PasteboardWriter.copyAsList(notes: store.notes, store: store, pasteboard: pasteboard))
-        XCTAssertEqual(layout.text, "- first\n- shot.png\n- second")
-        XCTAssertEqual(layout.textWithoutFilenames, "- first\n- second")
+        XCTAssertEqual(layout.text, "1. first\n2. shot.png\n3. second")
+        // The attachment-only note in between is filtered out before
+        // numbering, so textWithoutFilenames stays contiguous: 1, 2 — not
+        // 1, 3.
+        XCTAssertEqual(layout.textWithoutFilenames, "1. first\n2. second")
 
         let plainLayout = try XCTUnwrap(PasteboardWriter.copy(notes: store.notes, store: store, pasteboard: pasteboard))
         XCTAssertEqual(plainLayout.text, "first\n\nshot.png\n\nsecond")

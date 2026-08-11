@@ -360,8 +360,8 @@ final class PanelActionsTests: XCTestCase {
         actions.copyAllAsList(pasteboard: pasteboard)
 
         let copied = pasteboard.string(forType: .string)
-        XCTAssertEqual(copied?.contains("- a"), true)
-        XCTAssertEqual(copied?.contains("- b"), true)
+        XCTAssertEqual(copied?.contains("1. b"), true)
+        XCTAssertEqual(copied?.contains("2. a"), true)
     }
 
     func testToggleExpandedIsANoOpInTheLogbook() {

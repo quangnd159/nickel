@@ -66,23 +66,24 @@ enum PasteboardWriter {
         return layout
     }
 
-    /// Renders each note as a "- " bullet, with any internal newlines
-    /// indented two spaces so wrapped lines stay part of the same bullet.
-    /// Attachment-only notes bullet their filename(s) instead of body text.
+    /// Renders each note as a "1. " numbered item, with any internal
+    /// newlines indented three spaces so wrapped lines stay part of the same
+    /// item. Attachment-only notes number their filename(s) instead of body
+    /// text.
     @discardableResult
     static func copyAsList(notes: [Note], store: NoteStore, pasteboard: NSPasteboard = .general) -> Layout? {
         guard !notes.isEmpty else { return nil }
-        let lines = notes.map { note in
-            "- " + line(for: note).replacingOccurrences(of: "\n", with: "\n  ")
+        let lines = notes.enumerated().map { index, note in
+            "\(index + 1). " + line(for: note).replacingOccurrences(of: "\n", with: "\n   ")
         }
         let text = lines.joined(separator: "\n")
-        let textWithoutFilenames = notes.map(\.text).filter { !$0.isEmpty }
-            .map { "- " + $0.replacingOccurrences(of: "\n", with: "\n  ") }
+        let textWithoutFilenames = Array(notes.map(\.text).filter { !$0.isEmpty }.enumerated())
+            .map { index, text in "\(index + 1). " + text.replacingOccurrences(of: "\n", with: "\n   ") }
             .joined(separator: "\n")
-        let richLines = notes.map { note -> NSAttributedString in
-            let bulleted = NSMutableAttributedString(string: "- ")
-            bulleted.append(attributedLine(for: note, store: store, newlineIndent: "  "))
-            return bulleted
+        let richLines = notes.enumerated().map { index, note -> NSAttributedString in
+            let numbered = NSMutableAttributedString(string: "\(index + 1). ")
+            numbered.append(attributedLine(for: note, store: store, newlineIndent: "   "))
+            return numbered
         }
         let rich = joined(richLines, separator: "\n")
         let layout = makeLayout(text: text, textWithoutFilenames: textWithoutFilenames, rich: rich, notes: notes, store: store)
@@ -107,7 +108,7 @@ enum PasteboardWriter {
     /// are embedded as an `NSTextAttachment` (name + bytes preserved via its
     /// `NSFileWrapper`) instead of their filename text; non-image
     /// attachments still contribute filename text, matching `line(for:)`.
-    /// `newlineIndent` mirrors the two-space indent `copyAsList` applies to
+    /// `newlineIndent` mirrors the three-space indent `copyAsList` applies to
     /// wrapped lines.
     private static func attributedLine(for note: Note, store: NoteStore, newlineIndent: String = "") -> NSAttributedString {
         let result = NSMutableAttributedString()
