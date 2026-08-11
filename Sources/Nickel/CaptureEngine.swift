@@ -51,15 +51,20 @@ enum CaptureEngine {
 
     /// Heuristic check that a Markdown pasteboard capture corresponds to the
     /// Accessibility-reported selection, not an unrelated Cmd-C result.
-    /// Strips whitespace and Markdown marker characters from both strings and
-    /// accepts a match if one sanitized string contains the other, which
-    /// tolerates Markdown decoration (bold/italic markers, heading hashes,
-    /// list markers, link URLs) without requiring exact equality.
+    /// Keeps only Unicode letters from both strings, discarding whitespace,
+    /// digits, punctuation, and symbols, then accepts a match if one
+    /// sanitized string contains the other. Comparing letters only tolerates
+    /// Markdown decoration (bold/italic markers, heading hashes, list
+    /// markers/numbering) as well as typographic substitutions the Markdown
+    /// conversion makes (e.g. "•" becoming "-"), without requiring exact
+    /// equality. The check is mutual (both containment directions) because a
+    /// Markdown link adds letters of its own (URL scheme and domain) that
+    /// aren't in the AX text, so only the AX-in-Markdown direction would
+    /// match; testing both directions covers plain-text matches too.
     static func pasteboardResultMatchesAXText(_ markdown: String, axText: String) -> Bool {
-        let markers = CharacterSet(charactersIn: "*_`#>[]()-.0123456789")
         func sanitize(_ text: String) -> String {
             text.unicodeScalars
-                .filter { !CharacterSet.whitespacesAndNewlines.contains($0) && !markers.contains($0) }
+                .filter { CharacterSet.letters.contains($0) }
                 .map(String.init)
                 .joined()
         }

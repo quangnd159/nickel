@@ -31,4 +31,22 @@ final class CaptureMatchingTests: XCTestCase {
     func testEmptyAXTextIsRejected() {
         XCTAssertFalse(CaptureEngine.pasteboardResultMatchesAXText("some markdown", axText: ""))
     }
+
+    func testBulletGlyphVersusDashListIsTolerated() {
+        let axText = "Hue carries meaning, never state• green = added, struck muted = deleted"
+        let markdown = "- Hue carries meaning, never state\n- green = added, struck muted = deleted"
+        XCTAssertTrue(CaptureEngine.pasteboardResultMatchesAXText(markdown, axText: axText))
+    }
+
+    func testEmDashAndSmartQuoteSubstitutionIsTolerated() {
+        let axText = "She said —that\u{2019}s the plan— and left"
+        let markdown = "She said --that's the plan-- and left"
+        XCTAssertTrue(CaptureEngine.pasteboardResultMatchesAXText(markdown, axText: axText))
+    }
+
+    func testDifferentLetterContentIsStillRejected() {
+        let axText = "The quick brown fox jumps over the lazy dog"
+        let markdown = "- Completely unrelated grocery list items here"
+        XCTAssertFalse(CaptureEngine.pasteboardResultMatchesAXText(markdown, axText: axText))
+    }
 }
