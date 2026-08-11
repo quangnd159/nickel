@@ -17,18 +17,20 @@ operability, defensive persistence (atomic writes, corruption recovery,
 orphan cleanup), and deliberate visual design. No slop, no shortcuts that
 show.
 
-Nickel is a macOS menu-bar scratchpad: double-tap the left Shift key anywhere
-to capture whatever text you have selected, or double-tap the right Shift
-key to toggle a floating panel. It's part to-do list, part clipboard, part
-scratchpad for AI-chat workflows — jot down prompts or snippets, then copy
-them back into Claude, ChatGPT, or Cursor, and check them off as you go.
+Nickel is a clipboard that remembers: double-tap the left Shift key anywhere
+to capture whatever text you have selected (formatting included), or
+double-tap the right Shift key to toggle a floating panel. It's part to-do
+list, part scratchpad for AI-chat workflows — jot down prompts or snippets,
+then copy them back into Claude, ChatGPT, or Cursor, and check them off as
+you go.
 Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 
 ## Features
 
 - **Global double-Shift capture**: double-tap the left Shift key while text is
-  selected in any app to snapshot it straight into Nickel (via Accessibility,
-  falling back to a ⌘C pasteboard snapshot), with a small "Captured" HUD
+  selected in any app to snapshot it straight into Nickel with formatting
+  preserved as Markdown (a ⌘C pasteboard snapshot, cross-checked against the
+  Accessibility-reported selection so a wrong copy falls back to plain text), with a small "Captured" HUD
   confirming it — without stealing focus from what you were doing. If nothing's
   selected, a small HUD says so instead.
 - **Global double-Shift panel toggle**: double-tap the right Shift key

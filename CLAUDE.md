@@ -1,6 +1,6 @@
 # Nickel
 
-A native macOS menu-bar-triggered note capture app: double-Shift grabs the current text selection into a quick-entry panel.
+A native macOS note capture app, a clipboard that remembers: double-Shift grabs the current text selection (formatting preserved as Markdown) into a quick-entry panel.
 
 ## Commands
 
