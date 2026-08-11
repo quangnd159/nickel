@@ -1,6 +1,6 @@
 # Nickel
 
-A native macOS note capture app, a clipboard that remembers: double-Shift grabs the current text selection (formatting preserved as Markdown) into a quick-entry panel.
+A native macOS note capture app, a clipboard that remembers: double-Shift grabs the current text selection (formatting preserved as Markdown) into a quick-entry panel. Primary use case: capturing things to ask or tell an AI agent later without switching context; also used as a general to-do list.
 
 ## Commands
 
@@ -36,7 +36,7 @@ A native macOS note capture app, a clipboard that remembers: double-Shift grabs 
 ## Testing notes
 
 - `swift test` covers `NoteStore` and model/logic code — headlessly verifiable.
-- The AX/hotkey capture layer (`HotkeyMonitor.swift`, `CaptureEngine.swift`) cannot be verified headlessly; it requires a real Accessibility grant and manual/UI testing.
+- The AX/hotkey capture layer (`HotkeyMonitor.swift`, `CaptureEngine.swift`) cannot be verified headlessly; it requires a real Accessibility grant and manual/UI testing. Exception: `CaptureEngine.pasteboardResultMatchesAXText` is a pure helper with unit tests.
 
 ## Bar for all work
 

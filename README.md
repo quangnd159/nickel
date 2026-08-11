@@ -19,10 +19,12 @@ show.
 
 Nickel is a clipboard that remembers: double-tap the left Shift key anywhere
 to capture whatever text you have selected (formatting included), or
-double-tap the right Shift key to toggle a floating panel. It's part to-do
-list, part scratchpad for AI-chat workflows — jot down prompts or snippets,
-then copy them back into Claude, ChatGPT, or Cursor, and check them off as
-you go.
+double-tap the right Shift key to toggle a floating panel. It was built for
+working with AI agents: while an agent runs, capture anything you'll want to
+ask or tell it later — an error message, a snippet, a stray idea — without
+switching away from what you're doing, then feed it back into Claude,
+ChatGPT, or Cursor when the moment comes. Notes are checkable, so it doubles
+as a to-do list; in practice it's a very versatile clipboard.
 Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 
 ## Features
@@ -81,7 +83,7 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | **⌘F**   | Focus search                                                |
 | **⌘A**   | Select all notes                                            |
 | **⌘C**   | Copy selected note(s) as plain text                         |
-| **⇧⌘C**  | Copy selected note(s) as a `- ` bulleted list                |
+| **⇧⌘C**  | Copy selected note(s) as a numbered list                     |
 | **Space**| Toggle done / not-done on the selection                     |
 | **⌘E**   | Expand/collapse the selected note(s)                        |
 | **Return**| Edit the selected note (single selection only)              |

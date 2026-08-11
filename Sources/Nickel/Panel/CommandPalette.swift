@@ -150,7 +150,7 @@ enum PaletteCommand: CaseIterable {
         case .deleteSection: return "trash"
         case .clearDone, .clearDoneInSection: return "checkmark.circle"
         case .openLogbook: return "archivebox"
-        case .copyAllAsList: return "list.bullet"
+        case .copyAllAsList: return "list.number"
         case .settings: return "gearshape"
         }
     }
