@@ -33,7 +33,7 @@ struct SettingsView: View {
                         PanelSettings.showMenuBarIcon = newValue
                     }
             } footer: {
-                Text("With the menu bar icon hidden, Nickel stays available via double-Shift and the Dock.")
+                Text("With the menu bar icon hidden, Nickel stays available via its hotkeys and the Dock.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
