@@ -51,17 +51,18 @@ enum ModifierKey: String, CaseIterable {
         }
     }
 
-    /// User-facing name for the Settings pickers, e.g. "Left Shift".
+    /// User-facing name for the Settings pickers, led by the key's standard
+    /// glyph the way macOS renders modifiers everywhere, e.g. "⇧ Left Shift".
     var displayName: String {
         switch self {
-        case .leftShift: return "Left Shift"
-        case .rightShift: return "Right Shift"
-        case .leftControl: return "Left Control"
-        case .rightControl: return "Right Control"
-        case .leftOption: return "Left Option"
-        case .rightOption: return "Right Option"
-        case .leftCommand: return "Left Command"
-        case .rightCommand: return "Right Command"
+        case .leftShift: return "⇧ Left Shift"
+        case .rightShift: return "⇧ Right Shift"
+        case .leftControl: return "⌃ Left Control"
+        case .rightControl: return "⌃ Right Control"
+        case .leftOption: return "⌥ Left Option"
+        case .rightOption: return "⌥ Right Option"
+        case .leftCommand: return "⌘ Left Command"
+        case .rightCommand: return "⌘ Right Command"
         }
     }
 }
