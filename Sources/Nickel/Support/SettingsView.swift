@@ -8,6 +8,8 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var keepOnTop = PanelSettings.keepPanelOnTop
     @State private var showMenuBarIcon = PanelSettings.showMenuBarIcon
+    @State private var captureKey = PanelSettings.captureKey
+    @State private var panelToggleKey = PanelSettings.panelToggleKey
 
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
@@ -37,6 +39,30 @@ struct SettingsView: View {
             }
 
             Section {
+                Picker("Capture", selection: $captureKey) {
+                    ForEach(ModifierKey.allCases, id: \.self) { key in
+                        Text(key.displayName).tag(key)
+                    }
+                }
+                .onChange(of: captureKey) { _, newValue in
+                    PanelSettings.captureKey = newValue
+                }
+
+                Picker("Show/Hide Panel", selection: $panelToggleKey) {
+                    ForEach(ModifierKey.allCases, id: \.self) { key in
+                        Text(key.displayName).tag(key)
+                    }
+                }
+                .onChange(of: panelToggleKey) { _, newValue in
+                    PanelSettings.panelToggleKey = newValue
+                }
+            } footer: {
+                Text("Double-tap the chosen key from anywhere.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 LabeledContent("Version", value: appVersion)
 
                 HStack {
@@ -59,6 +85,15 @@ struct SettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: PanelSettings.showMenuBarIconDidChange)) { _ in
             showMenuBarIcon = PanelSettings.showMenuBarIcon
+        }
+        // A swap-on-conflict (see `PanelSettings.captureKey`) changes both
+        // keys from a single picker edit, so both must follow the shared
+        // setting for the two pickers to never show the same key.
+        .onReceive(NotificationCenter.default.publisher(for: PanelSettings.captureKeyDidChange)) { _ in
+            captureKey = PanelSettings.captureKey
+        }
+        .onReceive(NotificationCenter.default.publisher(for: PanelSettings.panelToggleKeyDidChange)) { _ in
+            panelToggleKey = PanelSettings.panelToggleKey
         }
         .frame(width: 360)
         .fixedSize()

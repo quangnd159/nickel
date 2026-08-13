@@ -1,15 +1,76 @@
 import AppKit
 
-/// Which physical Shift key a tap came from.
-enum ShiftSide {
-    case left
-    case right
+/// One of the 8 physical modifier keys a tap can be bound to. Caps Lock and
+/// Fn are excluded: Caps Lock is a toggle (no clean down/up tap), and Fn
+/// doesn't appear in `NSEvent.modifierFlags` the same way on all keyboards.
+enum ModifierKey: String, CaseIterable {
+    case leftShift, rightShift
+    case leftControl, rightControl
+    case leftOption, rightOption
+    case leftCommand, rightCommand
+
+    /// `keyCode` from a `.flagsChanged` NSEvent for this physical key.
+    init?(keyCode: UInt16) {
+        switch keyCode {
+        case 56: self = .leftShift
+        case 60: self = .rightShift
+        case 59: self = .leftControl
+        case 62: self = .rightControl
+        case 58: self = .leftOption
+        case 61: self = .rightOption
+        case 55: self = .leftCommand
+        case 54: self = .rightCommand
+        default: return nil
+        }
+    }
+
+    /// The `.flagsChanged` NSEvent `keyCode` for this physical key. Inverse
+    /// of `init(keyCode:)`.
+    var keyCode: UInt16 {
+        switch self {
+        case .leftShift: return 56
+        case .rightShift: return 60
+        case .leftControl: return 59
+        case .rightControl: return 62
+        case .leftOption: return 58
+        case .rightOption: return 61
+        case .leftCommand: return 55
+        case .rightCommand: return 54
+        }
+    }
+
+    /// The `NSEvent.ModifierFlags` bit this key sets. Left and right
+    /// siblings share one flag (e.g. both Shifts set `.shift`), which is why
+    /// the tap detector has to disambiguate by `keyCode`, not by flag alone.
+    var flag: NSEvent.ModifierFlags {
+        switch self {
+        case .leftShift, .rightShift: return .shift
+        case .leftControl, .rightControl: return .control
+        case .leftOption, .rightOption: return .option
+        case .leftCommand, .rightCommand: return .command
+        }
+    }
+
+    /// User-facing name for the Settings pickers, e.g. "Left Shift".
+    var displayName: String {
+        switch self {
+        case .leftShift: return "Left Shift"
+        case .rightShift: return "Right Shift"
+        case .leftControl: return "Left Control"
+        case .rightControl: return "Right Control"
+        case .leftOption: return "Left Option"
+        case .rightOption: return "Right Option"
+        case .leftCommand: return "Left Command"
+        case .rightCommand: return "Right Command"
+        }
+    }
 }
 
-/// Detects a system-wide double-tap of either Shift key: two clean shift-down/shift-up
-/// cycles, each undisturbed by any other key or modifier, within 350ms of each other.
-/// The two taps must land on the *same* side (both left or both right); a tap on the
-/// other side starts a new sequence for that side instead of completing this one.
+/// Detects a system-wide double-tap of any of the 8 physical modifier keys:
+/// two clean down/up cycles, each undisturbed by any other key or modifier,
+/// within 350ms of each other. The two taps must land on the *same* physical
+/// key (e.g. both Left Shift); a tap on a different key starts a new
+/// sequence for that key instead of completing this one.
 ///
 /// Also reports every ⌘V keyDown it sees via `onCommandV`, for
 /// `SequentialPasteCoordinator`: it needs a system-wide ⌘V observer, and
@@ -18,26 +79,30 @@ enum ShiftSide {
 final class HotkeyMonitor {
     static let shared = HotkeyMonitor()
 
-    var onDoubleShift: ((ShiftSide) -> Void)?
+    var onDoubleTap: ((ModifierKey) -> Void)?
     var onCommandV: ((NSEvent) -> Void)?
 
     private static let relevantModifiers: NSEvent.ModifierFlags = [.shift, .control, .option, .command]
-    private static let maxTapInterval: TimeInterval = 0.35
-    private static let leftShiftKeyCode: UInt16 = 56
-    private static let rightShiftKeyCode: UInt16 = 60
+    static let maxTapInterval: TimeInterval = 0.35
     private static let vKeyCode: UInt16 = 9
 
     private var globalMonitor: Any?
     private var localMonitor: Any?
 
     private var previousModifiers: NSEvent.ModifierFlags = []
-    private var shiftIsDownAlone = false
+    private var keyIsDownAlone = false
     private var currentTapDisqualified = false
-    private var currentTapSide: ShiftSide?
-    private var lastTapSide: ShiftSide?
+    private var currentTapKey: ModifierKey?
+    private var lastTapKey: ModifierKey?
     private var lastTapDate: Date?
 
-    private init() {}
+    /// Injected clock, so tests can drive the 350ms window deterministically
+    /// instead of the state machine depending on wall-clock time.
+    private let now: () -> Date
+
+    init(now: @escaping () -> Date = Date.init) {
+        self.now = now
+    }
 
     func start() {
         guard Permissions.isTrusted, globalMonitor == nil else { return }
@@ -67,17 +132,17 @@ final class HotkeyMonitor {
 
     private func reset() {
         previousModifiers = []
-        shiftIsDownAlone = false
+        keyIsDownAlone = false
         currentTapDisqualified = false
-        currentTapSide = nil
-        lastTapSide = nil
+        currentTapKey = nil
+        lastTapKey = nil
         lastTapDate = nil
     }
 
     private func handle(_ event: NSEvent) {
         switch event.type {
         case .flagsChanged:
-            handleFlagsChanged(event)
+            handleFlagsChanged(modifiers: event.modifierFlags, keyCode: event.keyCode)
         case .keyDown:
             handleKeyDown(event)
         default:
@@ -86,60 +151,69 @@ final class HotkeyMonitor {
     }
 
     private func handleKeyDown(_ event: NSEvent) {
-        // A real key press while Shift is held alone means Shift is being used as a
-        // modifier (typing a capital letter, ⌘⇧C, etc.), not a plain tap.
-        if shiftIsDownAlone {
-            currentTapDisqualified = true
-        }
+        disqualifyCurrentTap()
 
         if event.keyCode == Self.vKeyCode && event.modifierFlags.contains(.command) {
             onCommandV?(event)
         }
     }
 
-    private func handleFlagsChanged(_ event: NSEvent) {
-        let modifiers = event.modifierFlags.intersection(Self.relevantModifiers)
-        defer { previousModifiers = modifiers }
+    // MARK: - Pure tap-detection state machine
+    //
+    // `handleFlagsChanged` and `disqualifyCurrentTap` are `internal`, not
+    // `private`, so tests can drive them directly with synthetic keyCodes
+    // and modifier flags instead of constructing real NSEvents.
 
-        if modifiers == [.shift] && previousModifiers.isEmpty {
-            shiftIsDownAlone = true
+    /// Given the physical key that changed and the modifiers now held,
+    /// advances the tap state machine and fires `onDoubleTap` when a
+    /// qualifying second tap completes.
+    func handleFlagsChanged(modifiers: NSEvent.ModifierFlags, keyCode: UInt16) {
+        let relevant = modifiers.intersection(Self.relevantModifiers)
+        defer { previousModifiers = relevant }
+
+        if let key = ModifierKey(keyCode: keyCode), relevant == [key.flag], previousModifiers.isEmpty {
+            keyIsDownAlone = true
             currentTapDisqualified = false
-            currentTapSide = side(for: event.keyCode)
-        } else if modifiers.isEmpty && previousModifiers == [.shift] && shiftIsDownAlone {
-            shiftIsDownAlone = false
+            currentTapKey = key
+        } else if relevant.isEmpty, let key = currentTapKey, keyIsDownAlone {
+            keyIsDownAlone = false
             let wasQualified = !currentTapDisqualified
             currentTapDisqualified = false
-            if wasQualified, let side = currentTapSide {
-                registerTap(side: side)
+            currentTapKey = nil
+            if wasQualified {
+                registerTap(key: key)
             }
-            currentTapSide = nil
-        } else if shiftIsDownAlone {
-            // Some other modifier joined in (e.g. Shift+Command) before Shift was released.
+        } else if keyIsDownAlone {
+            // Some other modifier joined (e.g. Shift+Command), or the same
+            // flag came from the sibling key (e.g. both Shifts down) before
+            // this one was released.
             currentTapDisqualified = true
         }
     }
 
-    private func side(for keyCode: UInt16) -> ShiftSide? {
-        switch keyCode {
-        case Self.leftShiftKeyCode: return .left
-        case Self.rightShiftKeyCode: return .right
-        default: return nil
+    /// A real key press (or the sibling of the held key going down too)
+    /// while a modifier is held alone means it's being used as a modifier,
+    /// not a plain tap.
+    func disqualifyCurrentTap() {
+        if keyIsDownAlone {
+            currentTapDisqualified = true
         }
     }
 
-    private func registerTap(side: ShiftSide) {
-        let now = Date()
-        // Only two taps on the same side, within the window, count as a double-tap;
-        // a tap on the other side becomes the first tap of a new sequence.
-        if let lastTapDate, let lastTapSide, lastTapSide == side, now.timeIntervalSince(lastTapDate) <= Self.maxTapInterval {
+    private func registerTap(key: ModifierKey) {
+        let tapTime = now()
+        // Only two taps on the same physical key, within the window, count
+        // as a double-tap; a tap on a different key becomes the first tap
+        // of a new sequence.
+        if let lastTapDate, let lastTapKey, lastTapKey == key, tapTime.timeIntervalSince(lastTapDate) <= Self.maxTapInterval {
             self.lastTapDate = nil
-            self.lastTapSide = nil
-            debugLog("tap 2 (\(side)) -> fire")
-            onDoubleShift?(side)
+            self.lastTapKey = nil
+            debugLog("tap 2 (\(key)) -> fire")
+            onDoubleTap?(key)
         } else {
-            lastTapDate = now
-            lastTapSide = side
-            debugLog("tap 1 (\(side))")
+            lastTapDate = tapTime
+            lastTapKey = key
+            debugLog("tap 1 (\(key))")
         }
     }
 }
