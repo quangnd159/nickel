@@ -132,6 +132,18 @@ struct PanelView: View {
             VStack(spacing: 0) {
                 topBar
                     .padding(.bottom, 12)
+                    // Drags the window like a title bar. Expanded past the
+                    // bar's own layout bounds (negative padding bleeds a
+                    // `.background` outward) so the grab area also covers the
+                    // 16pt panel margin above/beside it and the 12pt gap
+                    // below, right out to the window edge — a generous strip
+                    // rather than just the thin row the controls occupy.
+                    .background(
+                        WindowDragArea()
+                            .padding(.top, -16)
+                            .padding(.horizontal, -16)
+                            .padding(.bottom, -12)
+                    )
 
                 // The global empty state only applies in Show All: with an
                 // active section, the pinned header + per-section hint must
