@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.noteEditorWindows.open(noteID: noteID)
         }
 
-        HotkeyMonitor.shared.onDoubleShift = { [weak self] side in self?.handleDoubleShift(side) }
+        HotkeyMonitor.shared.onDoubleTap = { [weak self] key in self?.handleDoubleTap(key) }
         HotkeyMonitor.shared.onCommandV = { [weak self] event in self?.handleCommandV(event) }
         startHotkeyMonitorOrPromptForAccess()
 
@@ -77,15 +77,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleDoubleShift(_ side: ShiftSide) {
-        switch side {
-        case .right:
+    /// Routes by the user's configured keys, read live so a Settings change
+    /// applies immediately without restart. A key that matches neither
+    /// setting (unreachable via the UI, since they're always distinct) is
+    /// ignored rather than defaulting to either action.
+    private func handleDoubleTap(_ key: ModifierKey) {
+        switch key {
+        case PanelSettings.panelToggleKey:
             // Toggling here also dismisses the panel while it's key, which
             // commits any in-progress edit (renaming a list, composing) via
             // the existing focus-loss paths.
             panel?.toggle()
-        case .left:
+        case PanelSettings.captureKey:
             captureSelectedText()
+        default:
+            break
         }
     }
 
