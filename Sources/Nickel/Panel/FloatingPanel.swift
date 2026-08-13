@@ -306,7 +306,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         // search field) when the panel becomes key. Clear it so the panel
         // opens with no text focus and note shortcuts (⌘C, Space, etc.) work
         // immediately; clicking the search field still focuses it normally.
-        makeFirstResponder(nil)
+        _ = makeFirstResponder(nil)
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.toggleAnimationDuration
