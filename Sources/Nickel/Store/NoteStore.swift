@@ -212,6 +212,23 @@ final class NoteStore: ObservableObject {
         scheduleSave()
     }
 
+    /// Marks the given notes done, leaving already-done notes untouched
+    /// (unlike `toggleDone`, which would flip them back to not-done). Used
+    /// by "mark as done when copied", where re-copying an already-done note
+    /// must never undo it.
+    func markDone(ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        let now = Date()
+        var didChange = false
+        for index in notes.indices where ids.contains(notes[index].id) && !notes[index].isDone {
+            notes[index].isDone = true
+            notes[index].completedAt = now
+            didChange = true
+        }
+        guard didChange else { return }
+        scheduleSave()
+    }
+
     func delete(ids: Set<UUID>) {
         guard !ids.isEmpty else { return }
         let deletedNoteIDs = notes.filter { ids.contains($0.id) }.map(\.id)

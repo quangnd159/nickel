@@ -33,6 +33,16 @@ enum PanelSettings {
         }
     }
 
+    private static let markDoneOnCopyDefaultsKey = "markDoneOnCopy"
+
+    /// Whether copying notes also marks them done. Read at copy time
+    /// (`PanelActions`), so unlike `keepPanelOnTop`/`showMenuBarIcon` there's
+    /// no other live consumer that needs a change notification.
+    static var markDoneOnCopy: Bool {
+        get { UserDefaults.standard.bool(forKey: markDoneOnCopyDefaultsKey) }
+        set { UserDefaults.standard.set(newValue, forKey: markDoneOnCopyDefaultsKey) }
+    }
+
     static var keepPanelOnTop: Bool {
         get {
             let defaults = UserDefaults.standard
