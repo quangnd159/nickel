@@ -727,6 +727,54 @@ final class NoteStoreTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: donorFileURL.path), "donor's file should still be present since it never moved")
     }
 
+    func testMergeJoinsTextInVisibleOrderNotCreationOrder() {
+        store.add(text: "first", sourceApp: nil)
+        let firstID = store.notes[0].id
+        store.add(text: "second", sourceApp: nil)
+        let secondID = store.notes[1].id
+        store.add(text: "third", sourceApp: nil)
+        let thirdID = store.notes[2].id
+
+        // Drag "third" to the front: array order is now third, first, second,
+        // while creation order (first, second, third) is unchanged.
+        store.move(ids: [thirdID], toSection: nil, before: firstID)
+        XCTAssertEqual(store.notes.map(\.id), [thirdID, firstID, secondID])
+
+        store.merge(ids: [firstID, secondID, thirdID])
+
+        XCTAssertEqual(store.notes.count, 1)
+        let survivor = store.notes[0]
+        XCTAssertEqual(survivor.id, firstID) // earliest-created note still survives
+        XCTAssertEqual(survivor.text, "third\n\nfirst\n\nsecond") // joined in visible (array) order
+    }
+
+    func testMergeAppendsDonorAttachmentsInVisibleOrder() throws {
+        let sourceA = tempDirectory.appendingPathComponent("a.txt")
+        let sourceB = tempDirectory.appendingPathComponent("b.txt")
+        try "fileA".write(to: sourceA, atomically: true, encoding: .utf8)
+        try "fileB".write(to: sourceB, atomically: true, encoding: .utf8)
+
+        store.add(text: "first", sourceApp: nil)
+        let firstID = store.notes[0].id
+        store.add(text: "second", attachments: [(sourceURL: sourceA, filename: "a.txt", contentType: "public.text")], sourceApp: nil)
+        let secondID = store.notes[1].id
+        store.add(text: "third", attachments: [(sourceURL: sourceB, filename: "b.txt", contentType: "public.text")], sourceApp: nil)
+        let thirdID = store.notes[2].id
+
+        // Drag "third" before "second": array order is first, third, second,
+        // so third's attachment should be appended before second's.
+        store.move(ids: [thirdID], toSection: nil, before: secondID)
+        XCTAssertEqual(store.notes.map(\.id), [firstID, thirdID, secondID])
+
+        store.merge(ids: [firstID, secondID, thirdID])
+
+        let survivor = store.notes[0]
+        XCTAssertEqual(survivor.id, firstID)
+        XCTAssertEqual(survivor.attachments.count, 2)
+        XCTAssertEqual(survivor.attachments[0].filename, "b.txt")
+        XCTAssertEqual(survivor.attachments[1].filename, "a.txt")
+    }
+
     // MARK: - Persistence
 
     func testPersistenceRoundTrips() {
