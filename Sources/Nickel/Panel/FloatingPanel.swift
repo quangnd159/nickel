@@ -200,10 +200,32 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// Every first-responder change in this window funnels through here, so
     /// this is where `SelectionModel.isComposerFocused` is kept true — the
     /// composer's "#" suggestion popup and its focus ring both follow it.
+    ///
+    /// `nil` — "give up text focus", which the background click, a click on a
+    /// row, Escape in an empty search field and the end of an inline edit all
+    /// ask for — hands focus to the note list instead of leaving it on the
+    /// window. The list is a real `NSTableView` now, and it has to be first
+    /// responder for its own arrow-key navigation to run at all. Keeping that
+    /// redirect here, rather than at each call site, keeps this window the
+    /// single focus authority it already was.
     override func makeFirstResponder(_ responder: NSResponder?) -> Bool {
-        let didChange = super.makeFirstResponder(responder)
+        let didChange = super.makeFirstResponder(responder ?? noteListTable())
         syncComposerFocus()
         return didChange
+    }
+
+    /// The note list's table view, wherever it currently sits in the
+    /// SwiftUI-hosted hierarchy (the live list and the Logbook each have their
+    /// own, and only one is on screen at a time).
+    private func noteListTable() -> NSTableView? {
+        guard let contentView else { return nil }
+        var queue: [NSView] = [contentView]
+        while let view = queue.first {
+            queue.removeFirst()
+            if let table = view as? NoteListTableView { return table }
+            queue += view.subviews
+        }
+        return nil
     }
 
     /// Key state as AppKit reports it through these two overrides, rather than
@@ -308,8 +330,12 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         makeKeyAndOrderFront(nil)
         // AppKit auto-assigns first responder to the first key-view (the
         // search field) when the panel becomes key. Clear it so the panel
-        // opens with no text focus and note shortcuts (⌘C, Space, etc.) work
-        // immediately; clicking the search field still focuses it normally.
+        // opens with the note list focused instead: note shortcuts (⌘C,
+        // Space, arrows) work immediately, and no text field has focus.
+        // Clicking the search field still focuses it normally. Laid out first
+        // so the list's table view exists to receive focus on the very first
+        // show (`NoteListCoordinator` claims it as a backstop if not).
+        contentView?.layoutSubtreeIfNeeded()
         _ = makeFirstResponder(nil)
 
         NSAnimationContext.runAnimationGroup { context in
@@ -565,18 +591,19 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     /// Returns `true` if the event was handled as a panel shortcut. Matching
     /// itself lives in the `PanelShortcuts` table (see that file for why);
-    /// this switch is only the dispatch, plus the event-context decisions
-    /// the table deliberately leaves to the panel: shift-extend on the
-    /// arrows, and Escape's clear-selection-else-toggle branch.
+    /// this switch is only the dispatch, plus the one event-context decision
+    /// the table deliberately leaves to the panel: Escape's
+    /// clear-selection-else-toggle branch.
     private func handle(_ event: NSEvent, actions: PanelActions) -> Bool {
         guard let command = PanelShortcuts.command(for: event) else { return false }
-        let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
 
         switch command {
-        case .moveDown:
-            actions.selection.moveSelection(direction: 1, extend: modifiers == [.shift])
-        case .moveUp:
-            actions.selection.moveSelection(direction: -1, extend: modifiers == [.shift])
+        case .moveDown, .moveUp:
+            // The table's own navigation, handled before the event ever
+            // reaches the window — see `NoteListTableView.keyDown`. Reaching
+            // here means the list doesn't have focus, in which case an arrow
+            // key has nothing to move.
+            return false
         case .edit:
             actions.startEditingIfSingleSelected()
         case .editInNewWindow:

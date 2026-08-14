@@ -2,17 +2,73 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+/// The note card's fixed metrics, shared by its SwiftUI content and by the
+/// table's AppKit hit-testing so the two can't drift apart.
+enum NoteRowMetrics {
+    static let horizontalPadding: CGFloat = 14
+    static let verticalPadding: CGFloat = 13
+    static let cornerRadius: CGFloat = 16
+    /// The circle glyph's rendered width at 19pt — the same assumption the
+    /// composer makes about its own circle.
+    static let checkboxWidth: CGFloat = 19
+    /// Gap between the checkbox and the note content.
+    static let checkboxContentSpacing: CGFloat = 12
+
+    /// One laid-out line of note text: 14pt system font with the 2pt line
+    /// spacing the display text and the inline editor share.
+    static let textLineHeight: CGFloat = 19
+
+    /// Anything left of the checkbox's right edge plus half the gap to the
+    /// note content counts as checkbox territory, so a click slightly above or
+    /// below the glyph but still in that column is forgiven. The column runs
+    /// the row's full height, so only `x` is ever checked.
+    static var checkboxColumnWidth: CGFloat {
+        horizontalPadding + checkboxWidth + checkboxContentSpacing / 2
+    }
+
+    /// How far below the last line of text the row's bottom sits: the card's
+    /// bottom padding — which the 2pt selection stroke and the corner radius
+    /// are drawn inside of — and then half the list's inter-row gap, since
+    /// `NSTableView` splits `intercellSpacing` evenly above and below a row.
+    ///
+    /// Anything revealing the caret has to include all of it, or the card is
+    /// left visibly unclosed at the bottom of the viewport.
+    static var bottomChromeHeight: CGFloat {
+        verticalPadding + NoteListMode.notes.rowSpacing / 2
+    }
+
+    /// How much has to be on screen below the top of the caret's line for the
+    /// card to read as closed under it: the line itself, then the card's
+    /// bottom chrome.
+    ///
+    /// Two things reveal the caret — the list's coordinated reveal when an
+    /// edit opens (`NoteListCoordinator.PendingReveal`) and the editor's own
+    /// caret follow while typing (`InlineNoteTextView.scrollRangeToVisible`).
+    /// They both measure from here, so the first keystroke after opening an
+    /// edit lands the view exactly where it already was.
+    static func caretRevealHeight(lineHeight: CGFloat = textLineHeight) -> CGFloat {
+        lineHeight + bottomChromeHeight
+    }
+}
+
 /// A single note card: circle checkbox + note text (or an inline editor),
 /// styled to match the Copper-style panel (white/dark-gray rounded card,
-/// blue selection outline). Handles click-to-select (with ⌘/⇧ modifiers),
-/// double-click-to-edit, and the note's context menu.
+/// blue selection outline).
 ///
-/// Display and edit both run through SwiftUI's own text engine (`Text` and
-/// `TextField(axis: .vertical)`) at the same 14pt/`.lineSpacing(2)` metrics,
-/// so wrapping and height match by construction.
-struct NoteRow: View {
-    let note: Note
-    let onToggleDone: () -> Void
+/// Purely the card's *look*, plus the inline editor. Clicks, double-clicks,
+/// the context menu and selection belong to the `NSTableView` that hosts this
+/// (see `NoteListTable`): a row's hosting view is invisible to the mouse
+/// except while that row is the one being edited, so the table sees every
+/// click and applies its own native selection.
+///
+/// The note is looked up by id rather than passed in as a value, so a cell
+/// that stays put across a list update always renders the current note.
+///
+/// Display and edit both run through SwiftUI's own text engine (`Text` and a
+/// self-sizing `NSTextView`) at the same 14pt/`.lineSpacing(2)` metrics, so
+/// wrapping and height match by construction.
+struct NoteRowContent: View {
+    let noteID: UUID
 
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
@@ -24,22 +80,10 @@ struct NoteRow: View {
     @State private var editFieldFocused: Bool = false
     @Environment(\.controlActiveState) private var controlActiveState
 
-    /// Frames (in the row's own coordinate space, see `attachmentsSpace`) of
-    /// each rendered attachment thumbnail/card, kept live via
-    /// `AttachmentFramesPreferenceKey`. Used to tell whether a double-click
-    /// landed on an attachment (open the file) rather than elsewhere on the
-    /// card (begin editing).
-    @State private var attachmentFrames: [AttachmentFrame] = []
+    private var note: Note? { store.notes.first { $0.id == noteID } }
 
-    /// The checkbox `Button`'s live frame (in `attachmentsSpace`), kept via
-    /// `CheckboxFramePreferenceKey`. Lets `isInCheckboxColumn` hit-test
-    /// against the checkbox's actual measured position instead of a
-    /// hand-summed constant that would silently drift out of sync with the
-    /// card's padding or the HStack's spacing.
-    @State private var checkboxFrame: CGRect = .zero
-
-    private var isSelected: Bool { selection.selectedIDs.contains(note.id) }
-    private var isEditing: Bool { selection.editingID == note.id }
+    private var isSelected: Bool { selection.selectedIDs.contains(noteID) }
+    private var isEditing: Bool { selection.editingID == noteID }
 
     /// Selection outline color. AppKit draws selection with the accent color
     /// only while the window is key and drops to the unemphasized gray
@@ -53,26 +97,26 @@ struct NoteRow: View {
     }
     private static let attachmentsSpace = "NoteRow.attachments"
 
-    /// Gap between the checkbox and the note content. Shared by the HStack
-    /// below and `isInCheckboxColumn`'s column-extension math so the two
-    /// stay in sync instead of duplicating the value.
-    private static let checkboxContentSpacing: CGFloat = 12
-
     var body: some View {
-        HStack(alignment: .top, spacing: Self.checkboxContentSpacing) {
-            Button(action: onToggleDone) {
-                Image(systemName: note.isDone ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 19, weight: .light))
-                    .foregroundStyle(note.isDone ? .secondary : .quaternary)
-                    .frame(height: 19)
-            }
-            .buttonStyle(.plain)
+        if let note {
+            card(note)
+        }
+    }
+
+    private func card(_ note: Note) -> some View {
+        HStack(alignment: .top, spacing: NoteRowMetrics.checkboxContentSpacing) {
+            // A plain glyph, not a button: the checkbox column's clicks are
+            // caught by the table (see `NoteListCoordinator.handleClick`) so
+            // they toggle done without ever touching the selection.
             // Hidden from accessibility rather than labeled: `.combine` on
             // the row would concatenate a label into the row's own text
             // ("Mark as Done, <note text>"), and the toggle is already
             // exposed as the row's named action (see below).
-            .accessibilityHidden(true)
-            .reportingCheckboxFrame(in: Self.attachmentsSpace)
+            Image(systemName: note.isDone ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: NoteRowMetrics.checkboxWidth, weight: .light))
+                .foregroundStyle(note.isDone ? .secondary : .quaternary)
+                .frame(height: NoteRowMetrics.checkboxWidth)
+                .accessibilityHidden(true)
 
             // `.identity` on both branches: the editor and the display text
             // render pixel-identically (same font, spacing, wrap width —
@@ -89,55 +133,35 @@ struct NoteRow: View {
                     editField
                         .transition(.identity)
                 } else {
-                    displayText
+                    displayText(note)
                         .transition(.identity)
                 }
             }
         }
         // Reads the row as one element (note text once, not a bag of static
         // texts) while editing keeps the text field individually reachable.
-        // `.combine` gives a nested `Button` an implicit button trait on the
-        // whole row without carrying over its tap handler, so the toggle is
-        // exposed explicitly as a named action instead of relying on that.
-        .noteRowAccessibility(isDone: note.isDone, isEditing: isEditing, toggleDone: onToggleDone)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
+        // The done toggle is exposed as a named action, since the checkbox
+        // glyph itself is decorative (the table owns its clicks).
+        .noteRowAccessibility(
+            isDone: note.isDone,
+            isEditing: isEditing,
+            toggleDone: { store.toggleDone(ids: [note.id]) }
+        )
+        .padding(.horizontal, NoteRowMetrics.horizontalPadding)
+        .padding(.vertical, NoteRowMetrics.verticalPadding)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
         )
+        // The selected look, drawn here rather than by `NSTableRowView`'s
+        // default fill: an outline, not a filled highlight. `NoteListRowView`
+        // suppresses AppKit's own selection drawing so this is the only one.
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
                 .strokeBorder(selectionStroke, lineWidth: 2)
                 .opacity(isSelected ? 1 : 0)
         )
         .coordinateSpace(name: Self.attachmentsSpace)
-        .onPreferenceChange(AttachmentFramesPreferenceKey.self) { attachmentFrames = $0 }
-        .onPreferenceChange(CheckboxFramePreferenceKey.self) { checkboxFrame = $0 }
-        .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
-        // Row-wide click target: clicking anywhere on the card (including its
-        // padding) selects it. One count:1 recognizer handles both clicks:
-        // it fires on every mouse-up (so click-to-select is immediate, no
-        // double-click-window wait), and the second click of a double-click
-        // is told apart by `NSEvent.clickCount` — a simultaneous count:2
-        // `SpatialTapGesture` never fires once a count:1 recognizer has
-        // already succeeded on the same view. `simultaneousGesture` (rather
-        // than `onTapGesture`) so the checkbox `Button`'s own tap handling
-        // isn't excluded; the handlers instead explicitly ignore hits that
-        // land in the checkbox column (see `isInCheckboxColumn`, which
-        // hit-tests against the checkbox's measured frame rather than a
-        // hand-summed constant) so the checkbox stays selection-inert (a
-        // pure work-tracking control, Copper/Reminders/Things-style).
-        .contentShape(Rectangle())
-        .simultaneousGesture(
-            SpatialTapGesture(count: 1).onEnded { value in handleClick(at: value.location) }
-        )
-        .contextMenu { contextMenuContent }
-        .onGeometryChange(for: CGRect.self) { proxy in
-            proxy.frame(in: .named(SelectionModel.viewportSpaceName))
-        } action: { frame in
-            selection.rowViewportFrames[note.id] = frame
-        }
     }
 
     // MARK: - Editing / display subviews
@@ -165,10 +189,10 @@ struct NoteRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var isExpanded: Bool { selection.expandedIDs.contains(note.id) }
+    private var isExpanded: Bool { selection.expandedIDs.contains(noteID) }
 
     @ViewBuilder
-    private var displayText: some View {
+    private func displayText(_ note: Note) -> some View {
         // An attachment-only note (no text) skips the text view entirely
         // rather than rendering an empty `Text`, which would otherwise leave
         // an awkward blank line above the attachments.
@@ -187,7 +211,7 @@ struct NoteRow: View {
                     // (block markers like "#"/"-"/">" stripped) with inline
                     // styling still applied, so the clamp behaves like simple
                     // wrapped text.
-                    Text(renderedText)
+                    Text(MarkdownCache.collapsedPreview(for: note.text))
                         .font(.system(size: 14))
                         .lineSpacing(2)
                         .foregroundStyle(.primary)
@@ -199,7 +223,7 @@ struct NoteRow: View {
             }
 
             if !note.attachments.isEmpty {
-                attachmentsView
+                attachmentsView(note)
             }
         }
     }
@@ -210,13 +234,13 @@ struct NoteRow: View {
     /// else (a non-image file, or more than one attachment) renders as a
     /// stack of compact icon + filename cards.
     @ViewBuilder
-    private var attachmentsView: some View {
+    private func attachmentsView(_ note: Note) -> some View {
         if note.attachments.count == 1, isImage(note.attachments[0]) {
-            imageThumbnail(note.attachments[0])
+            imageThumbnail(note.attachments[0], in: note)
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(note.attachments) { attachment in
-                    attachmentCard(attachment)
+                    attachmentCard(attachment, in: note)
                 }
             }
         }
@@ -226,7 +250,7 @@ struct NoteRow: View {
         UTType(attachment.contentType)?.conforms(to: .image) ?? false
     }
 
-    private func imageThumbnail(_ attachment: Attachment) -> some View {
+    private func imageThumbnail(_ attachment: Attachment, in note: Note) -> some View {
         AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 64)
             .frame(maxHeight: 64)
             .fixedSize(horizontal: true, vertical: false)
@@ -239,7 +263,7 @@ struct NoteRow: View {
             .reportingAttachmentFrame(id: attachment.id, in: Self.attachmentsSpace)
     }
 
-    private func attachmentCard(_ attachment: Attachment) -> some View {
+    private func attachmentCard(_ attachment: Attachment, in note: Note) -> some View {
         HStack(spacing: 8) {
             AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 28)
                 .frame(width: 28, height: 28)
@@ -264,79 +288,6 @@ struct NoteRow: View {
         .reportingAttachmentFrame(id: attachment.id, in: Self.attachmentsSpace)
     }
 
-    /// Opens `attachment`'s file in its default app (double-click only —
-    /// see `handleDoubleClick`). No `QLPreviewPanel`: that's a
-    /// nonactivating-panel focus headache this app doesn't need.
-    private func openAttachment(id: UUID) {
-        guard let attachment = note.attachments.first(where: { $0.id == id }) else { return }
-        NSWorkspace.shared.open(store.url(for: attachment, in: note))
-    }
-
-    // MARK: - Click handling
-
-    /// Anything left of the checkbox's measured right edge, plus half the
-    /// gap to the note content, counts as checkbox territory — a click
-    /// slightly above or below the 19×19 glyph but still in that column is
-    /// forgiven, matching the full-height column this used to compute from
-    /// hand-summed constants. `y` isn't checked at all: the column runs the
-    /// row's full height.
-    private func isInCheckboxColumn(_ location: CGPoint) -> Bool {
-        location.x < checkboxFrame.maxX + Self.checkboxContentSpacing / 2
-    }
-
-    /// Dispatches on `NSEvent.clickCount` (see the gesture comment in
-    /// `body`): the second mouse-up of a double-click re-enters here with
-    /// `clickCount == 2` after the first was already handled as a single.
-    private func handleClick(at location: CGPoint) {
-        if NSApp.currentEvent?.clickCount == 2 {
-            handleDoubleClick(at: location)
-        } else {
-            handleSingleClick(at: location)
-        }
-    }
-
-    private func handleSingleClick(at location: CGPoint) {
-        guard !isInCheckboxColumn(location) else { return }
-        // Clicking another row while this one is mid-edit steals focus,
-        // which fires `editFocus`'s `onChange` and commits — but that's a
-        // separate view instance's state, so it can lose a race against the
-        // selection mutation below if both land in the same tick. Committing
-        // explicitly here first guarantees the previously-edited note's text
-        // is saved before selection moves on.
-        actions.commitActiveEditIfAny()
-        guard !isEditing else { return }
-        // Selecting a row this way is a click outside any text field, so it
-        // should behave like the background click handler and give up text
-        // focus (composer or search field) — otherwise `FloatingPanel`'s
-        // `isEditingText` gate keeps suppressing list keyboard shortcuts.
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        let flags = NSEvent.modifierFlags
-        selection.handleClick(on: note.id, shift: flags.contains(.shift), command: flags.contains(.command))
-    }
-
-    private func handleDoubleClick(at location: CGPoint) {
-        guard !isInCheckboxColumn(location) else { return }
-        actions.commitActiveEditIfAny()
-        // Double-clicking an attachment thumbnail/card opens the file
-        // instead of entering edit mode — checked by hit-testing the tracked
-        // frames rather than a gesture on the attachment view itself, so a
-        // single click there still falls through to this row's own
-        // selection handling untouched.
-        if let hitID = attachmentFrames.first(where: { $0.frame.contains(location) })?.id {
-            openAttachment(id: hitID)
-            return
-        }
-        guard !isEditing else { return }
-        let flags = NSEvent.modifierFlags
-        guard !flags.contains(.command), !flags.contains(.shift) else { return }
-        beginEditing()
-    }
-
-    private func beginEditing() {
-        selection.selectSingle(note.id)
-        selection.beginEditing(id: note.id, text: note.text)
-    }
-
     private func commitEdit() {
         guard isEditing else { return }
         actions.commitActiveEditIfAny()
@@ -358,71 +309,6 @@ struct NoteRow: View {
         commitEdit()
     }
 
-    /// Collapsed preview text: block markers (heading `#`, list `-`/`1.`,
-    /// blockquote `>`) are stripped so the 3-line clamp reads as plain
-    /// wrapped text, while inline styling (bold/italic/links/code) still
-    /// renders via `AttributedString(markdown:, options:
-    /// .inlineOnlyPreservingWhitespace)`. Falls back to plain text if that
-    /// fails to parse. Memoized in `MarkdownCache` — see its doc comment for
-    /// why: rows are eager `VStack` children, so every row's `body` (and
-    /// this property) re-evaluates on every store change, not just the row
-    /// that actually changed.
-    private var renderedText: AttributedString {
-        MarkdownCache.collapsedPreview(for: note.text)
-    }
-
-    // MARK: - Context menu
-
-    @ViewBuilder
-    private var contextMenuContent: some View {
-        Button("Copy") { actions.copy() }
-            .panelKeyboardShortcut(.copy)
-
-        Button("Copy as List") { actions.copyAsList() }
-            .panelKeyboardShortcut(.copyAsList)
-
-        Divider()
-
-        Button(actions.allSelectedAreDone ? "Mark as Not Done" : "Mark as Done") {
-            actions.toggleDone()
-        }
-        .panelKeyboardShortcut(.toggleDone)
-
-        Button(actions.allSelectedAreExpanded ? "Collapse" : "Expand") {
-            actions.toggleExpanded()
-        }
-        .panelKeyboardShortcut(.toggleExpanded)
-        .disabled(selection.selectedIDs.isEmpty)
-
-        Button("Edit") { actions.startEditingIfSingleSelected() }
-            .panelKeyboardShortcut(.edit)
-            .disabled(selection.selectedIDs.count != 1)
-
-        Button("Edit in New Window") { actions.editInNewWindow() }
-            .panelKeyboardShortcut(.editInNewWindow)
-            .disabled(selection.selectedIDs.count != 1)
-
-        Button("Merge Notes") { actions.merge() }
-            .panelKeyboardShortcut(.merge)
-            .disabled(selection.selectedIDs.count < 2)
-
-        Menu("Move to Section") {
-            ForEach(store.sections, id: \.self) { sectionName in
-                Button(sectionName) { actions.move(toSection: sectionName) }
-            }
-            Button("No Section") { actions.move(toSection: nil) }
-            Divider()
-            Button("New Section with Selection") { actions.createSectionWithSelection() }
-        }
-
-        Divider()
-
-        Button("Move to Logbook") { actions.moveToLogbook() }
-            .panelKeyboardShortcut(.moveToLogbook)
-
-        Button("Delete") { actions.delete() }
-            .panelKeyboardShortcut(.delete)
-    }
 }
 
 // MARK: - Inline editor text surface
@@ -508,27 +394,11 @@ private struct InlineNoteEditorField: NSViewRepresentable {
             guard let view else { return }
             view.window?.makeFirstResponder(view)
             view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
-            // The reveal itself is coordinated by `PanelView`: entering an
-            // edit that would grow past the viewport issues an animated
-            // `scrollTo(_, anchor: .bottom)` in the same spring as the
-            // row's growth (an AppKit-level scroll here would be overridden
-            // — SwiftUI's `ScrollView` owns its offset while its layout is
-            // animating). This deferred pass is only a correctness
-            // backstop, after the spring has settled: a no-op when the
-            // coordinated scroll landed, a small correction if the height
-            // estimate it used was off. It reveals the caret plus the
-            // card's bottom chrome (13pt padding + 2pt stroke) that
-            // `scrollRangeToVisible` alone stops short of.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak view] in
-                guard let view, view.window != nil else { return }
-                view.window?.layoutIfNeeded()
-                view.scrollRangeToVisible(view.selectedRange())
-                let bottomChrome: CGFloat = 15
-                view.scrollToVisible(NSRect(
-                    x: 0, y: view.bounds.maxY,
-                    width: view.bounds.width, height: bottomChrome
-                ))
-            }
+            // No scrolling from here. Revealing the caret is the list's job
+            // and it does it in the same animation as the row's growth (see
+            // `NoteListCoordinator.applyPendingReveal`) — a scroll issued
+            // here would land after that animation as a separate, jarring
+            // second motion.
         }
         return view
     }
@@ -634,6 +504,30 @@ private final class InlineNoteTextView: NSTextView {
         invalidateIntrinsicContentSize()
     }
 
+    /// `NSTextView` reveals the caret on every insertion, and its idea of the
+    /// caret is the bare glyph rect — which, on the last line, seats the text
+    /// flush against the bottom of the viewport and cuts off the card's
+    /// padding, stroke and rounded corners. Extending the rect by the card's
+    /// bottom chrome keeps the row visibly closed underneath the caret. Still
+    /// a minimal scroll: `scrollToVisible` moves the least it can, and the
+    /// extension is capped at the row's own bottom so it never reveals past
+    /// the card.
+    override func scrollRangeToVisible(_ range: NSRange) {
+        guard let layoutManager, let textContainer else {
+            super.scrollRangeToVisible(range)
+            return
+        }
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        rect.origin.x += textContainerOrigin.x
+        rect.origin.y += textContainerOrigin.y
+        rect.size.height = min(
+            NoteRowMetrics.caretRevealHeight(lineHeight: rect.height),
+            bounds.maxY + NoteRowMetrics.bottomChromeHeight - rect.minY
+        )
+        scrollToVisible(rect)
+    }
+
     /// A width change rewraps the text, so the height must be remeasured.
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = newSize.width != frame.width
@@ -656,27 +550,18 @@ private final class InlineNoteTextView: NSTextView {
 
 // MARK: - Attachment hit-testing
 
-/// One attachment's on-screen frame, reported in `NoteRow.attachmentsSpace`
-/// so `handleDoubleClick` can tell whether a click landed on it.
-private struct AttachmentFrame: Equatable {
+/// One attachment's on-screen frame, in the row's own (top-left origin)
+/// coordinate space — which is also the hosting view's, so the table can
+/// hit-test a double-click against it directly.
+struct NoteAttachmentFrame: Equatable {
     let id: UUID
     let frame: CGRect
 }
 
-private struct AttachmentFramesPreferenceKey: PreferenceKey {
-    static var defaultValue: [AttachmentFrame] = []
-    static func reduce(value: inout [AttachmentFrame], nextValue: () -> [AttachmentFrame]) {
+struct NoteAttachmentFramesKey: PreferenceKey {
+    static var defaultValue: [NoteAttachmentFrame] = []
+    static func reduce(value: inout [NoteAttachmentFrame], nextValue: () -> [NoteAttachmentFrame]) {
         value += nextValue()
-    }
-}
-
-/// The checkbox `Button`'s on-screen frame, reported in
-/// `NoteRow.attachmentsSpace` so `isInCheckboxColumn` can hit-test against
-/// it instead of a hand-summed constant.
-private struct CheckboxFramePreferenceKey: PreferenceKey {
-    static var defaultValue: CGRect = .zero
-    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
-        value = nextValue()
     }
 }
 
@@ -694,32 +579,16 @@ private extension View {
             .accessibilityAction(named: Text(isDone ? "Mark as Not Done" : "Mark as Done"), toggleDone)
     }
 
-    /// Publishes this view's frame (in the named coordinate space) as an
-    /// `AttachmentFramesPreferenceKey` entry for `id`, so an ancestor can
-    /// hit-test clicks against it without the attachment view needing its
-    /// own gesture recognizer (which would otherwise double-fire alongside
-    /// the row's own click handling — see `NoteRow.handleDoubleClick`).
+    /// Publishes this view's frame (in the named coordinate space) as a
+    /// `NoteAttachmentFramesKey` entry for `id`, so the table can hit-test a
+    /// double-click against it without the attachment view needing a gesture
+    /// recognizer of its own — see `NoteListCoordinator.handleDoubleClick`.
     func reportingAttachmentFrame(id: UUID, in coordinateSpace: String) -> some View {
         background(
             GeometryReader { geometry in
                 Color.clear.preference(
-                    key: AttachmentFramesPreferenceKey.self,
-                    value: [AttachmentFrame(id: id, frame: geometry.frame(in: .named(coordinateSpace)))]
-                )
-            }
-        )
-    }
-
-    /// Publishes this view's frame (in the named coordinate space) as the
-    /// `CheckboxFramePreferenceKey` value, so an ancestor can hit-test clicks
-    /// against the checkbox's actual measured position — see
-    /// `NoteRow.isInCheckboxColumn`.
-    func reportingCheckboxFrame(in coordinateSpace: String) -> some View {
-        background(
-            GeometryReader { geometry in
-                Color.clear.preference(
-                    key: CheckboxFramePreferenceKey.self,
-                    value: geometry.frame(in: .named(coordinateSpace))
+                    key: NoteAttachmentFramesKey.self,
+                    value: [NoteAttachmentFrame(id: id, frame: geometry.frame(in: .named(coordinateSpace)))]
                 )
             }
         )

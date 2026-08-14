@@ -37,8 +37,9 @@ final class PanelShortcutsTests: XCTestCase {
         XCTAssertNil(PanelShortcuts.command(for: event))
     }
 
-    /// The arrows stay modifier-agnostic: ⇧↓ has to reach `.moveDown` for
-    /// extend-selection to work.
+    /// The arrows stay modifier-agnostic, so `NoteListTableView.keyDown` can
+    /// recognize ⇧↓ as the table's own extend-selection navigation and let it
+    /// through rather than passing it to the panel's shortcut layer.
     func testShiftArrowStillMovesSelection() {
         let event = keyEvent(keyCode: Self.downArrowKeyCode, modifiers: .shift)
         XCTAssertEqual(PanelShortcuts.command(for: event), .moveDown)
@@ -59,6 +60,25 @@ final class PanelShortcutsTests: XCTestCase {
     func testEveryCommandHasExactlyOneTableEntry() {
         for command in PanelCommand.allCases {
             XCTAssertEqual(PanelShortcuts.all.filter { $0.command == command }.count, 1, "\(command)")
+        }
+    }
+
+    /// The row's contextual menu is an `NSMenu` (see `NoteContextMenu`) and
+    /// the shortcuts card reads the SwiftUI form, so a command that shows a
+    /// hint in one place must show one in the other.
+    func testMenuShortcutAndItsAppKitSpellingAgreeOnWhichCommandsHaveOne() {
+        for shortcut in PanelShortcuts.all {
+            XCTAssertEqual(
+                shortcut.menuShortcut != nil,
+                shortcut.menuKeyEquivalent != nil,
+                "\(shortcut.command)"
+            )
+        }
+    }
+
+    func testArrowsAndEscapeCarryNoMenuHint() {
+        for command in [PanelCommand.moveDown, .moveUp, .escape] {
+            XCTAssertNil(PanelShortcuts.shortcut(for: command).menuKeyEquivalent, "\(command)")
         }
     }
 }

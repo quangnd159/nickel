@@ -25,107 +25,6 @@ final class SelectionModelTests: XCTestCase {
         super.tearDown()
     }
 
-    // MARK: - Click handling
-
-    func testPlainClickSelectsSingleThenReplacesOnAnother() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        let idA = store.notes[0].id
-        let idB = store.notes[1].id
-
-        selection.handleClick(on: idA, shift: false, command: false)
-        XCTAssertEqual(selection.selectedIDs, [idA])
-
-        selection.handleClick(on: idB, shift: false, command: false)
-        XCTAssertEqual(selection.selectedIDs, [idB])
-    }
-
-    func testCommandClickTogglesMembershipWithoutClearingOthers() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        store.add(text: "c", sourceApp: nil)
-        let idA = store.notes[0].id
-        let idB = store.notes[1].id
-        let idC = store.notes[2].id
-
-        selection.handleClick(on: idA, shift: false, command: false)
-        selection.handleClick(on: idB, shift: false, command: true)
-        XCTAssertEqual(selection.selectedIDs, [idA, idB])
-
-        selection.handleClick(on: idC, shift: false, command: true)
-        XCTAssertEqual(selection.selectedIDs, [idA, idB, idC])
-
-        // Toggling an already-selected note removes only it.
-        selection.handleClick(on: idB, shift: false, command: true)
-        XCTAssertEqual(selection.selectedIDs, [idA, idC])
-    }
-
-    func testShiftClickWithAnchorSelectsInclusiveRangeAndExtendsFromSameAnchor() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        store.add(text: "c", sourceApp: nil)
-        store.add(text: "d", sourceApp: nil)
-        let ids = store.notes.map(\.id)
-
-        selection.handleClick(on: ids[1], shift: false, command: false) // anchor at index 1
-        selection.handleClick(on: ids[3], shift: true, command: false)
-        XCTAssertEqual(selection.selectedIDs, Set(ids[1...3]))
-
-        // A further shift-click extends from the *same* anchor (index 1), not from index 3.
-        selection.handleClick(on: ids[0], shift: true, command: false)
-        XCTAssertEqual(selection.selectedIDs, Set(ids[0...1]))
-    }
-
-    func testShiftClickWithNoPriorAnchorBehavesAsSelectSingle() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        let idB = store.notes[1].id
-
-        selection.handleClick(on: idB, shift: true, command: false)
-        XCTAssertEqual(selection.selectedIDs, [idB])
-    }
-
-    // MARK: - Keyboard navigation
-
-    func testMoveSelectionStepsDownAndClampsAtLastNote() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        store.add(text: "c", sourceApp: nil)
-        let ids = store.notes.map(\.id)
-
-        selection.selectSingle(ids[0])
-
-        selection.moveSelection(direction: 1, extend: false)
-        XCTAssertEqual(selection.selectedIDs, [ids[1]])
-
-        selection.moveSelection(direction: 1, extend: false)
-        XCTAssertEqual(selection.selectedIDs, [ids[2]])
-
-        // Already at the last note: repeated calls don't wrap.
-        selection.moveSelection(direction: 1, extend: false)
-        XCTAssertEqual(selection.selectedIDs, [ids[2]])
-    }
-
-    func testMoveSelectionExtendGrowsPastAnchorsImmediateNeighborOnRepeatedCalls() {
-        // Regression for the `leadID` behavior described at SelectionModel.swift:65-69:
-        // repeated shift-arrows must keep growing the range, not snap back to
-        // just the anchor's immediate neighbor each time.
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        store.add(text: "c", sourceApp: nil)
-        store.add(text: "d", sourceApp: nil)
-        store.add(text: "e", sourceApp: nil)
-        let ids = store.notes.map(\.id)
-
-        selection.selectSingle(ids[2]) // anchor = ids[2]
-
-        selection.moveSelection(direction: 1, extend: true)
-        XCTAssertEqual(selection.selectedIDs, Set(ids[2...3]))
-
-        selection.moveSelection(direction: 1, extend: true)
-        XCTAssertEqual(selection.selectedIDs, Set(ids[2...4]))
-    }
-
     // MARK: - Search filtering vs. selection
 
     func testSelectionOfNoteHiddenByFilterSurvives() {
@@ -153,8 +52,7 @@ final class SelectionModelTests: XCTestCase {
         let idA = store.notes[0].id
         let idB = store.notes[1].id
 
-        selection.handleClick(on: idA, shift: false, command: false)
-        selection.handleClick(on: idB, shift: false, command: true)
+        selection.selectedIDs = [idA, idB]
         selection.beginEditing(id: idA, text: "a")
         XCTAssertEqual(selection.editingID, idA)
 
@@ -240,91 +138,51 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertTrue(selection.filteredNotes.isEmpty)
     }
 
-    // MARK: - Keyboard reveal (scroll-into-view)
+    // MARK: - Reveal (scroll-into-view)
+    //
+    // Arrow-key navigation no longer raises a reveal request: `NSTableView`
+    // keeps the lead row visible on its own. Expanding a row still does —
+    // the row grows downward, so a note near the viewport bottom would
+    // otherwise disclose its content off-screen.
 
-    func testMoveSelectionSetsRevealRequestToNewLeadID() {
+    func testExpandingRevealsTheLastExpandedRow() {
         store.add(text: "a", sourceApp: nil)
         store.add(text: "b", sourceApp: nil)
         let ids = store.notes.map(\.id)
 
-        selection.selectSingle(ids[0])
         XCTAssertNil(selection.revealRequest)
 
-        selection.moveSelection(direction: 1, extend: false)
+        selection.toggleExpanded(ids: [ids[0], ids[1]])
+
         XCTAssertEqual(selection.revealRequest?.id, ids[1])
     }
 
-    func testRepeatedMoveSelectionCallsProduceDistinctTokens() {
+    func testRepeatedExpandsProduceDistinctRevealTokens() {
         store.add(text: "a", sourceApp: nil)
         store.add(text: "b", sourceApp: nil)
-        store.add(text: "c", sourceApp: nil)
         let ids = store.notes.map(\.id)
 
-        selection.selectSingle(ids[0])
-
-        selection.moveSelection(direction: 1, extend: false)
+        selection.toggleExpanded(ids: [ids[0]])
         let firstRequest = selection.revealRequest
 
-        selection.moveSelection(direction: 1, extend: false)
+        selection.toggleExpanded(ids: [ids[1]])
         let secondRequest = selection.revealRequest
 
         XCTAssertNotEqual(firstRequest, secondRequest)
-        XCTAssertEqual(firstRequest?.id, ids[1])
-        XCTAssertEqual(secondRequest?.id, ids[2])
+        XCTAssertEqual(firstRequest?.id, ids[0])
+        XCTAssertEqual(secondRequest?.id, ids[1])
     }
 
-    func testMoveSelectionAtBoundaryStillRaisesRevealRequestForUnchangedLead() {
-        // Design choice: a boundary move (already at the last/first row)
-        // still raises a fresh `revealRequest` for the unchanged lead, so a
-        // row that scrolled out of view by some other means (e.g. a panel
-        // resize) gets pulled back on screen. `ScrollViewReader.scrollTo` is
-        // a no-op when the row's already visible, so this is harmless.
+    func testCollapsingDoesNotSetRevealRequest() {
         store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        let ids = store.notes.map(\.id)
+        let id = store.notes[0].id
 
-        selection.selectSingle(ids[1]) // already at the last note
+        selection.toggleExpanded(ids: [id])
+        let afterExpand = selection.revealRequest
 
-        selection.moveSelection(direction: 1, extend: false)
+        selection.toggleExpanded(ids: [id])
 
-        XCTAssertEqual(selection.selectedIDs, [ids[1]])
-        XCTAssertEqual(selection.revealRequest?.id, ids[1])
-    }
-
-    func testMoveSelectionWithNoSelectionRevealsTheEntryRow() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        let ids = store.notes.map(\.id)
-
-        selection.moveSelection(direction: -1, extend: false)
-
-        XCTAssertEqual(selection.selectedIDs, [ids[1]])
-        XCTAssertEqual(selection.revealRequest?.id, ids[1])
-    }
-
-    func testMoveSelectionExtendAlsoSetsRevealRequestToLead() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        let ids = store.notes.map(\.id)
-
-        selection.selectSingle(ids[0])
-        selection.moveSelection(direction: 1, extend: true)
-
-        XCTAssertEqual(selection.revealRequest?.id, ids[1])
-    }
-
-    func testClickDoesNotSetRevealRequest() {
-        store.add(text: "a", sourceApp: nil)
-        store.add(text: "b", sourceApp: nil)
-        let idA = store.notes[0].id
-        let idB = store.notes[1].id
-
-        selection.handleClick(on: idA, shift: false, command: false)
-        selection.handleClick(on: idB, shift: false, command: false)
-        selection.handleClick(on: idB, shift: true, command: false)
-        selection.toggle(idA)
-
-        XCTAssertNil(selection.revealRequest)
+        XCTAssertEqual(selection.revealRequest, afterExpand, "collapse only shrinks the row, so nothing needs revealing")
     }
 
     func testSelectAllDoesNotSetRevealRequest() {
@@ -338,24 +196,26 @@ final class SelectionModelTests: XCTestCase {
 
     // MARK: - Select all
 
-    func testSelectAllNotesSelectsEverythingWithAnchorFirstAndLeadLast() {
+    func testSelectAllNotesSelectsEveryVisibleNote() {
         store.add(text: "a", sourceApp: nil)
         store.add(text: "b", sourceApp: nil)
         store.add(text: "c", sourceApp: nil)
         let ids = store.notes.map(\.id)
 
         selection.selectAllNotes()
-        XCTAssertEqual(selection.selectedIDs, Set(ids))
 
-        // lead should be the last note: extending down from here should
-        // clamp in place (already at the end), proving lead == ids.last.
-        selection.moveSelection(direction: 1, extend: true)
         XCTAssertEqual(selection.selectedIDs, Set(ids))
+    }
 
-        // anchor should be the first note: extending up all the way should
-        // select the full range down to (and including) the anchor.
-        selection.moveSelection(direction: -1, extend: true)
-        XCTAssertEqual(selection.selectedIDs, Set(ids[0...(ids.count - 2)]))
+    func testSelectAllNotesIsScopedToWhatTheSearchFilterLeavesVisible() {
+        store.add(text: "apple", sourceApp: nil)
+        store.add(text: "banana", sourceApp: nil)
+        let idApple = store.notes[0].id
+
+        selection.searchText = "apple"
+        selection.selectAllNotes()
+
+        XCTAssertEqual(selection.selectedIDs, [idApple])
     }
 
     // MARK: - Logbook
