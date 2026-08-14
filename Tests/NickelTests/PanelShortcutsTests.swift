@@ -81,4 +81,46 @@ final class PanelShortcutsTests: XCTestCase {
             XCTAssertNil(PanelShortcuts.shortcut(for: command).menuKeyEquivalent, "\(command)")
         }
     }
+
+    // MARK: - WindowShortcuts
+
+    func testEveryWindowCommandHasExactlyOneTableEntry() {
+        for command in WindowCommand.allCases {
+            XCTAssertEqual(WindowShortcuts.all.filter { $0.command == command }.count, 1, "\(command)")
+        }
+    }
+
+    func testEveryWindowShortcutHasNonEmptyTitleAndOverlayStrings() {
+        for shortcut in WindowShortcuts.all {
+            XCTAssertFalse(shortcut.menuTitle.isEmpty, "\(shortcut.command)")
+            XCTAssertFalse(shortcut.overlay.label.isEmpty, "\(shortcut.command)")
+            XCTAssertFalse(shortcut.overlay.keys.isEmpty, "\(shortcut.command)")
+        }
+    }
+
+    /// The menu equivalent and the match rule must agree on which key/
+    /// modifiers fire the command — otherwise the menu item and the window's
+    /// `performKeyEquivalent` interception would drift, like the bug this
+    /// table exists to prevent (see `PanelShortcutsTests`' file-top note on
+    /// `PanelShortcuts`).
+    func testWindowMenuEquivalentAndMatchRuleAgreeOnKeyAndModifiers() {
+        for shortcut in WindowShortcuts.all {
+            let (key, modifiers) = shortcut.menuKeyEquivalent
+            let event = keyEvent(keyCode: 0, modifiers: modifiers, characters: key)
+            XCTAssertEqual(WindowShortcuts.command(for: event), shortcut.command, "\(shortcut.command)")
+        }
+    }
+
+    /// HIG: a menu title ends in "…" exactly when the command opens further
+    /// UI — a palette (switch/move/rename) or the Settings window.
+    func testWindowTitlesEndInEllipsisExactlyWhenTheyOpenFurtherUI() {
+        let opensFurtherUI: Set<WindowCommand> = [.sectionSwitcher, .moveToSection, .renameSection, .settings]
+        for shortcut in WindowShortcuts.all {
+            XCTAssertEqual(
+                shortcut.menuTitle.hasSuffix("…"),
+                opensFurtherUI.contains(shortcut.command),
+                "\(shortcut.command)"
+            )
+        }
+    }
 }

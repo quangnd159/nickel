@@ -282,48 +282,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
 
-        let switchSectionItem = NSMenuItem(
-            title: "Switch Section…",
-            action: #selector(switchSection),
-            keyEquivalent: "k"
-        )
-        switchSectionItem.target = self
-        viewMenu.addItem(switchSectionItem)
-
-        let moveToSectionItem = NSMenuItem(
-            title: "Move to Section…",
-            action: #selector(moveToSection),
-            keyEquivalent: "m"
-        )
-        moveToSectionItem.keyEquivalentModifierMask = [.control, .command]
-        moveToSectionItem.target = self
-        viewMenu.addItem(moveToSectionItem)
+        viewMenu.addItem(windowMenuItem(for: .sectionSwitcher, action: #selector(switchSection)))
+        viewMenu.addItem(windowMenuItem(for: .moveToSection, action: #selector(moveToSection)))
 
         viewMenu.addItem(.separator())
 
-        let nextSectionItem = NSMenuItem(title: "Next Section", action: #selector(nextSection), keyEquivalent: "]")
-        nextSectionItem.keyEquivalentModifierMask = [.command, .shift]
-        nextSectionItem.target = self
-        viewMenu.addItem(nextSectionItem)
-
-        let previousSectionItem = NSMenuItem(
-            title: "Previous Section",
-            action: #selector(previousSection),
-            keyEquivalent: "["
-        )
-        previousSectionItem.keyEquivalentModifierMask = [.command, .shift]
-        previousSectionItem.target = self
-        viewMenu.addItem(previousSectionItem)
+        viewMenu.addItem(windowMenuItem(for: .nextSection, action: #selector(nextSection)))
+        viewMenu.addItem(windowMenuItem(for: .previousSection, action: #selector(previousSection)))
 
         viewMenu.addItem(.separator())
 
-        let shortcutsItem = NSMenuItem(
-            title: "Keyboard Shortcuts",
-            action: #selector(showKeyboardShortcuts),
-            keyEquivalent: "/"
-        )
-        shortcutsItem.target = self
-        viewMenu.addItem(shortcutsItem)
+        viewMenu.addItem(windowMenuItem(for: .shortcutsCard, action: #selector(showKeyboardShortcuts)))
 
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
@@ -377,6 +346,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         if let panel, !panel.isVisible {
             panel.toggle()
         }
+    }
+
+    /// Builds a menu item from `WindowShortcuts`' table entry for `command`
+    /// — the single source of truth its title and key equivalent come from
+    /// (see `PanelShortcuts.swift`'s `WindowShortcut`).
+    private func windowMenuItem(for command: WindowCommand, action: Selector) -> NSMenuItem {
+        let shortcut = WindowShortcuts.shortcut(for: command)
+        let item = NSMenuItem(title: shortcut.menuTitle, action: action, keyEquivalent: shortcut.menuKeyEquivalent.key)
+        item.keyEquivalentModifierMask = shortcut.menuKeyEquivalent.modifiers
+        item.target = self
+        return item
     }
 
     @objc private func switchSection() {
