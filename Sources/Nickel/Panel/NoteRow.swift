@@ -14,12 +14,27 @@ enum NoteRowMetrics {
     /// Gap between the checkbox and the note content.
     static let checkboxContentSpacing: CGFloat = 12
 
+    /// One laid-out line of note text: 14pt system font with the 2pt line
+    /// spacing the display text and the inline editor share.
+    static let textLineHeight: CGFloat = 19
+
     /// Anything left of the checkbox's right edge plus half the gap to the
     /// note content counts as checkbox territory, so a click slightly above or
     /// below the glyph but still in that column is forgiven. The column runs
     /// the row's full height, so only `x` is ever checked.
     static var checkboxColumnWidth: CGFloat {
         horizontalPadding + checkboxWidth + checkboxContentSpacing / 2
+    }
+
+    /// How far below the last line of text the row's bottom sits: the card's
+    /// bottom padding — which the 2pt selection stroke and the corner radius
+    /// are drawn inside of — and then half the list's inter-row gap, since
+    /// `NSTableView` splits `intercellSpacing` evenly above and below a row.
+    ///
+    /// Anything revealing the caret has to include all of it, or the card is
+    /// left visibly unclosed at the bottom of the viewport.
+    static var bottomChromeHeight: CGFloat {
+        verticalPadding + NoteListMode.notes.rowSpacing / 2
     }
 }
 
@@ -474,6 +489,30 @@ private final class InlineNoteTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         invalidateIntrinsicContentSize()
+    }
+
+    /// `NSTextView` reveals the caret on every insertion, and its idea of the
+    /// caret is the bare glyph rect — which, on the last line, seats the text
+    /// flush against the bottom of the viewport and cuts off the card's
+    /// padding, stroke and rounded corners. Extending the rect by the card's
+    /// bottom chrome keeps the row visibly closed underneath the caret. Still
+    /// a minimal scroll: `scrollToVisible` moves the least it can, and the
+    /// extension is capped at the row's own bottom so it never reveals past
+    /// the card.
+    override func scrollRangeToVisible(_ range: NSRange) {
+        guard let layoutManager, let textContainer else {
+            super.scrollRangeToVisible(range)
+            return
+        }
+        let glyphRange = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        rect.origin.x += textContainerOrigin.x
+        rect.origin.y += textContainerOrigin.y
+        rect.size.height = min(
+            rect.height + NoteRowMetrics.bottomChromeHeight,
+            bounds.maxY + NoteRowMetrics.bottomChromeHeight - rect.minY
+        )
+        scrollToVisible(rect)
     }
 
     /// A width change rewraps the text, so the height must be remeasured.

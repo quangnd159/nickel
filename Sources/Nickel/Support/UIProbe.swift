@@ -41,6 +41,10 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
     and a click lands on the following row instead of in the text.
     """
 
+    /// Long enough that its inline editor is taller than the whole viewport,
+    /// so the reveal has to pick which end of the row to show.
+    private static let veryLongNoteText = Array(repeating: longNoteText, count: 3).joined(separator: "\n\n")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("NickelUIProbe-\(UUID().uuidString)", isDirectory: true)
@@ -292,6 +296,10 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         let editingRow = table.rect(ofRow: bottomRow)
         print("— bottom row, editing —")
         print("  visible=\(editingVisible)  row=\(editingRow)")
+        if let cell = table.view(atColumn: 0, row: bottomRow, makeIfNecessary: false) {
+            let card = cell.convert(cell.bounds, to: table)
+            print("  card=\(card)  cardBottom−visibleBottom=\(card.maxY - editingVisible.maxY)")
+        }
         check(
             editingRow.maxY <= editingVisible.maxY + 0.5,
             "the editor's end (\(editingRow.maxY)) should be visible (viewport ends \(editingVisible.maxY))"
@@ -336,6 +344,96 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         )
         selection.toggleExpanded(ids: batch)
         settle()
+
+        checkTallEditReveal(table: table, store: store, selection: selection, clipView: clipView)
+    }
+
+    /// The case the shorter notes above never reach: an editor taller than the
+    /// viewport. The caret is on the last line, and the card has to be visibly
+    /// closed under it — bottom padding, stroke and the full corner radius —
+    /// not cut off at the viewport's edge.
+    private func checkTallEditReveal(
+        table: NoteListTableView,
+        store: NoteStore,
+        selection: SelectionModel,
+        clipView: NSClipView
+    ) {
+        store.add(text: Self.veryLongNoteText, sourceApp: nil)
+        settle()
+
+        guard let tallNote = store.activeNotes.last,
+              let tallRow = table.coordinator?.rows.firstIndex(of: .note(tallNote.id)) else {
+            fail("could not find the very long note's row")
+            return
+        }
+
+        selection.selectSingle(tallNote.id)
+        selection.beginEditing(id: tallNote.id, text: tallNote.text)
+        settle()
+
+        let visible = clipView.documentVisibleRect
+        let rowRect = table.rect(ofRow: tallRow)
+        print("— editor taller than the viewport —")
+        print("  visible=\(visible)  row=\(rowRect)")
+        guard let cell = table.view(atColumn: 0, row: tallRow, makeIfNecessary: false) else {
+            fail("the tall editing row has no cell")
+            return
+        }
+        let card = cell.convert(cell.bounds, to: table)
+        print("  card=\(card)  cardBottom−visibleBottom=\(card.maxY - visible.maxY)")
+
+        check(
+            rowRect.height > visible.height,
+            "the probe's tall note should actually exceed the viewport "
+                + "(row \(rowRect.height), viewport \(visible.height))"
+        )
+        check(
+            card.maxY <= visible.maxY + 0.5,
+            "the card's bottom edge (\(card.maxY)) must be inside the viewport (ends \(visible.maxY))"
+        )
+        // The corner radius is the deepest part of the card's bottom edge, so
+        // seeing the whole corner is what "visibly closed" means.
+        check(
+            card.maxY - NoteRowMetrics.cornerRadius >= visible.minY,
+            "the card's bottom corners should be fully on screen "
+                + "(corner starts \(card.maxY - NoteRowMetrics.cornerRadius), viewport starts \(visible.minY))"
+        )
+        check(
+            rowRect.maxY <= visible.maxY + 0.5,
+            "the row's bottom, gap included, should sit at or above the viewport's "
+                + "(\(rowRect.maxY) vs \(visible.maxY))"
+        )
+
+        // Typing is the case that actually bites: `NSTextView` reveals the
+        // caret itself on every insertion, and its idea of the caret is the
+        // glyph, with none of the card around it.
+        if let textView = firstTextView(in: cell) {
+            textView.insertText("x", replacementRange: textView.selectedRange())
+            settle()
+            let typedVisible = clipView.documentVisibleRect
+            let typedCard = cell.convert(cell.bounds, to: table)
+            print("— after typing at the end —")
+            print("  visible=\(typedVisible)  card=\(typedCard)")
+            print("  cardBottom−visibleBottom=\(typedCard.maxY - typedVisible.maxY)")
+            check(
+                typedCard.maxY <= typedVisible.maxY + 0.5,
+                "typing on the last line must keep the card's bottom edge visible "
+                    + "(card ends \(typedCard.maxY), viewport ends \(typedVisible.maxY))"
+            )
+        } else {
+            fail("no text view in the editing cell")
+        }
+
+        selection.endEditing()
+        settle()
+    }
+
+    private func firstTextView(in view: NSView) -> NSTextView? {
+        if let textView = view as? NSTextView { return textView }
+        for subview in view.subviews {
+            if let found = firstTextView(in: subview) { return found }
+        }
+        return nil
     }
 
     // MARK: - Harness plumbing

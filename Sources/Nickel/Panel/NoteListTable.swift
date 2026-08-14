@@ -98,10 +98,14 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
             }
         }
 
-        /// The height of the end sliver a `rowEnd` reveal asks for: the last
-        /// line of text plus the card's bottom padding and stroke, so the
-        /// caret lands clear of the row's edge.
-        static let endSliverHeight: CGFloat = 19 + NoteRowMetrics.verticalPadding + 2
+        /// The height of the end sliver a `rowEnd` reveal asks for, measured
+        /// up from the row's bottom: the card's bottom chrome — padding,
+        /// stroke, corner radius, and the gap below the card — plus the line
+        /// of text the caret sits on. Revealing this much shows the card
+        /// visibly closed with the caret on the last line inside it.
+        static var endSliverHeight: CGFloat {
+            NoteRowMetrics.textLineHeight + NoteRowMetrics.bottomChromeHeight
+        }
 
         func rect(in rowRect: NSRect) -> NSRect {
             switch self {
@@ -519,7 +523,14 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
         // A collapse can strand the scroll past the end of a now-shorter list;
         // `NSScrollView` settles back onto the content, so this does too.
-        let maxY = max(0, tableView.frame.height - visible.height)
+        //
+        // `noteHeightOfRows` retiles the rows immediately, but the table's own
+        // frame catches up on the next layout pass, so the content end is
+        // taken as whichever is greater. Trusting a not-yet-grown frame here
+        // would clamp the reveal short and leave the row it just grew hanging
+        // below the viewport — the exact thing the reveal exists to prevent.
+        let contentHeight = max(tableView.frame.height, rows.indices.isEmpty ? 0 : tableView.rect(ofRow: rows.count - 1).maxY)
+        let maxY = max(0, contentHeight - visible.height)
         targetY = min(max(targetY, 0), maxY)
 
         guard abs(targetY - visible.minY) > 0.5 else { return }
