@@ -81,6 +81,44 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// The last reveal request acted on, so a re-render doesn't re-scroll.
     private var lastRevealToken: UUID?
 
+    /// A row waiting to be brought into view, applied inside the same
+    /// animation as the height change that made it necessary.
+    private var pendingReveal: PendingReveal?
+
+    /// What a reveal has to put on screen.
+    enum PendingReveal {
+        /// The whole row — expanding discloses all of it.
+        case row(NoteListRow)
+        /// Just the row's end — opening an inline edit parks the caret there.
+        case rowEnd(NoteListRow)
+
+        var row: NoteListRow {
+            switch self {
+            case .row(let row), .rowEnd(let row): return row
+            }
+        }
+
+        /// The height of the end sliver a `rowEnd` reveal asks for: the last
+        /// line of text plus the card's bottom padding and stroke, so the
+        /// caret lands clear of the row's edge.
+        static let endSliverHeight: CGFloat = 19 + NoteRowMetrics.verticalPadding + 2
+
+        func rect(in rowRect: NSRect) -> NSRect {
+            switch self {
+            case .row:
+                return rowRect
+            case .rowEnd:
+                let height = min(rowRect.height, Self.endSliverHeight)
+                return NSRect(
+                    x: rowRect.minX,
+                    y: rowRect.maxY - height,
+                    width: rowRect.width,
+                    height: height
+                )
+            }
+        }
+    }
+
     /// Cells that have reported a new ideal height, batched until the end of
     /// the runloop turn so one settling pass costs one retile. Held as cells
     /// rather than row indices because a row can be inserted or removed before
@@ -194,13 +232,15 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         // from the store is everything the cell derives from the row model —
         // refreshed here — and the row's height, which the cell reports back
         // once its content has actually settled at its new size.
+        // Ordered: the reveal reads the previous editing state, which the
+        // animation-intent pass then overwrites.
+        notePendingReveal()
         noteHeightAnimationIntent()
         invalidateChangedRowHeights()
         refreshExistingCells()
         syncSelectionToTable()
         isSyncingSelection = false
 
-        applyPendingReveal()
         claimFocusIfNothingHasIt()
     }
 
@@ -222,12 +262,31 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         }
     }
 
+    /// Marks the rows an expand/collapse or an opening/closing edit will
+    /// resize, so they're all re-measured in one flush — the reveal that goes
+    /// with them is computed from the resulting geometry, and a half-updated
+    /// list would put it in the wrong place. Those two are also the changes
+    /// worth animating; typing and store updates land instantly, matching
+    /// which of them the old SwiftUI list ran inside `withAnimation`.
     private func noteHeightAnimationIntent() {
-        if selection.editingID != lastEditingID || selection.expandedIDs != lastExpandedIDs {
-            animatesPendingHeightChange = true
+        let editingChanged = selection.editingID != lastEditingID
+        let expandedChanged = selection.expandedIDs != lastExpandedIDs
+        guard editingChanged || expandedChanged else { return }
+
+        animatesPendingHeightChange = true
+        if editingChanged {
+            for id in [lastEditingID, selection.editingID].compactMap({ $0 }) {
+                staleHeightRows.insert(.note(id))
+            }
+        }
+        if expandedChanged {
+            for id in selection.expandedIDs.symmetricDifference(lastExpandedIDs) {
+                staleHeightRows.insert(.note(id))
+            }
         }
         lastEditingID = selection.editingID
         lastExpandedIDs = selection.expandedIDs
+        scheduleHeightFlush()
     }
 
     /// The list is the panel's resting focus: with it first responder, the
@@ -290,14 +349,23 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         var usedMeasuringHost = false
 
         for (index, item) in rows.enumerated() {
-            guard rowHeights[item] == nil || staleHeightRows.contains(item) else { continue }
+            let isStale = staleHeightRows.contains(item)
+            guard rowHeights[item] == nil || isStale else { continue }
 
             let measured: CGFloat
-            if let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? NoteListCellView,
+            if !isStale,
+               let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? NoteListCellView,
                cell.contentIdealHeight > 0 {
-                // A row on screen already knows its own height.
+                // A row on screen that hasn't been invalidated already knows
+                // its own height.
                 measured = cell.contentIdealHeight
             } else {
+                // A stale row is measured from scratch, never from its cell:
+                // what made it stale (an edit opening, a row expanding, the
+                // note's text changing) reaches the cell's SwiftUI content on
+                // its own render tick, so the cell may still be reporting the
+                // size it's about to stop having. Building the content here
+                // reads the current state directly.
                 measuringHost.rootView = AnyView(
                     content(for: item, at: index).frame(width: width, alignment: .leading)
                 )
@@ -389,27 +457,95 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
         let animates = animatesPendingHeightChange
         animatesPendingHeightChange = false
-        guard !indexes.isEmpty else { return }
+        guard !indexes.isEmpty || pendingReveal != nil else { return }
 
-        guard animates else {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0
+        // One transaction for both motions. `noteHeightOfRows` retiles
+        // immediately and animates according to the surrounding context (view
+        // -based tables "animate by default"; a zero-duration group is the
+        // documented way to suppress that), so the reveal below can read the
+        // new row geometry and animate the scroll alongside the growth
+        // instead of chasing it afterwards.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = animates ? 0.24 : 0
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            if !indexes.isEmpty {
                 tableView.noteHeightOfRows(withIndexesChanged: indexes)
             }
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.24
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            tableView.animator().noteHeightOfRows(withIndexesChanged: indexes)
+            applyPendingReveal()
         }
     }
 
-    private func applyPendingReveal() {
+    /// Notes a row that should be brought into view once the height change
+    /// that prompted it has been applied. Nothing scrolls here: the scroll has
+    /// to run in the same animation as the growth, or the list moves twice.
+    private func notePendingReveal() {
+        if let editingID = selection.editingID, editingID != lastEditingID {
+            // Opening an inline edit puts the caret at the end of the note, so
+            // the end is what has to be on screen.
+            pendingReveal = .rowEnd(.note(editingID))
+            scheduleHeightFlush()
+        }
         guard let request = selection.revealRequest, request.token != lastRevealToken else { return }
         lastRevealToken = request.token
-        guard let row = rows.firstIndex(of: .note(request.id)) else { return }
-        tableView.scrollRowToVisible(row)
+        // Expanding discloses the whole note; the reveal covers the row.
+        pendingReveal = .row(.note(request.id))
+        scheduleHeightFlush()
+    }
+
+    /// Scrolls the least amount that brings the pending reveal into view, and
+    /// settles the scroll position back onto the content if a row shrinking
+    /// has left it past the end.
+    ///
+    /// Called from inside the height flush's animation group, after
+    /// `noteHeightOfRows` has retiled — which it does immediately, so
+    /// `rect(ofRow:)` already reports the new geometry while the visible
+    /// change is still animating. Both motions therefore belong to one
+    /// transaction and settle together.
+    private func applyPendingReveal() {
+        let reveal = pendingReveal
+        pendingReveal = nil
+
+        let clipView = scrollView.contentView
+        let visible = clipView.documentVisibleRect
+        guard visible.height > 0 else { return }
+
+        var targetY = visible.minY
+        if let reveal, let row = rows.firstIndex(of: reveal.row) {
+            let rowRect = tableView.rect(ofRow: row)
+            if let revealed = Self.revealOrigin(for: reveal.rect(in: rowRect), in: visible) {
+                targetY = revealed
+            }
+        }
+
+        // A collapse can strand the scroll past the end of a now-shorter list;
+        // `NSScrollView` settles back onto the content, so this does too.
+        let maxY = max(0, tableView.frame.height - visible.height)
+        targetY = min(max(targetY, 0), maxY)
+
+        guard abs(targetY - visible.minY) > 0.5 else { return }
+        let origin = NSPoint(x: visible.minX, y: targetY)
+        if NSAnimationContext.current.duration > 0 {
+            clipView.animator().setBoundsOrigin(origin)
+        } else {
+            clipView.setBoundsOrigin(origin)
+        }
+        scrollView.reflectScrolledClipView(clipView)
+    }
+
+    /// The scroll origin that brings `rect` into view, moving as little as
+    /// possible, or `nil` when it's already fully visible.
+    ///
+    /// `NSView.scrollToVisible(_:)` documents the same "minimum distance"
+    /// rule, but leaves what happens to an oversized rect undefined, so the
+    /// too-tall case is spelled out here rather than inherited: a rect taller
+    /// than the viewport pins its top, which shows the start of whatever was
+    /// just disclosed. An inline edit doesn't hit that case — it asks for a
+    /// sliver at the row's end, never the whole row.
+    static func revealOrigin(for rect: NSRect, in visible: NSRect) -> CGFloat? {
+        if rect.height >= visible.height { return rect.minY }
+        if rect.maxY > visible.maxY { return rect.maxY - visible.height }
+        if rect.minY < visible.minY { return rect.minY }
+        return nil
     }
 
     // MARK: Selection bridge

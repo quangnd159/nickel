@@ -196,6 +196,11 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
                 + "(expected \(collapsedLongHeight), got \(table.rect(ofRow: longRow).height))"
         )
 
+        // Reveal: a row near the bottom that grows past the viewport has to be
+        // brought into view, by the least amount that does it, and the scroll
+        // must never be left stranded past the end of the content.
+        checkReveal(table: table, store: store, selection: selection)
+
         // (h) Section headers are group rows with their own, much smaller
         // content — they went through the same broken measurement.
         store.createSection(named: "Probe Section")
@@ -215,6 +220,122 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         }
 
         finish()
+    }
+
+    // MARK: - Reveal
+
+    /// Fills the list past the viewport, then checks that growing its last row
+    /// scrolls it into view — minimally — and that shrinking it back doesn't
+    /// leave the scroll position hanging past the content.
+    private func checkReveal(table: NoteListTableView, store: NoteStore, selection: SelectionModel) {
+        for index in 0..<12 {
+            store.add(text: "Filler note \(index)", sourceApp: nil)
+        }
+        store.add(text: Self.longNoteText, sourceApp: nil)
+        settle()
+
+        guard let bottomNote = store.activeNotes.last,
+              let bottomRow = table.coordinator?.rows.firstIndex(of: .note(bottomNote.id)) else {
+            fail("could not find the bottom note's row")
+            return
+        }
+
+        let clipView = table.enclosingScrollView?.contentView
+        guard let clipView else {
+            fail("the table has no enclosing scroll view")
+            return
+        }
+
+        // Scroll to the very bottom so the last row is on screen but its
+        // growth will run off the end.
+        table.scrollRowToVisible(bottomRow)
+        settle()
+        print("— bottom row, before expanding —")
+        print("  visible=\(clipView.documentVisibleRect)  row=\(table.rect(ofRow: bottomRow))")
+
+        let beforeOrigin = clipView.documentVisibleRect.minY
+
+        selection.toggleExpanded(ids: [bottomNote.id])
+        settle()
+        let expandedVisible = clipView.documentVisibleRect
+        let expandedRow = table.rect(ofRow: bottomRow)
+        print("— bottom row, expanded —")
+        print("  visible=\(expandedVisible)  row=\(expandedRow)")
+
+        check(
+            expandedRow.maxY <= expandedVisible.maxY + 0.5,
+            "the expanded row's bottom (\(expandedRow.maxY)) should be inside the visible rect "
+                + "(ends \(expandedVisible.maxY))"
+        )
+        check(
+            expandedVisible.minY > beforeOrigin,
+            "expanding a bottom row should have scrolled down (was \(beforeOrigin), now \(expandedVisible.minY))"
+        )
+
+        selection.toggleExpanded(ids: [bottomNote.id])
+        settle()
+        let collapsedVisible = clipView.documentVisibleRect
+        print("— bottom row, collapsed again —")
+        print("  visible=\(collapsedVisible)  content=\(table.frame.height)")
+        check(
+            collapsedVisible.maxY <= table.frame.height + 0.5,
+            "collapsing must not strand the scroll past the content "
+                + "(visible ends \(collapsedVisible.maxY), content \(table.frame.height))"
+        )
+
+        // Beginning an edit on the bottom note must put the editor's end —
+        // where the caret sits — on screen.
+        selection.selectSingle(bottomNote.id)
+        selection.beginEditing(id: bottomNote.id, text: bottomNote.text)
+        settle()
+        let editingVisible = clipView.documentVisibleRect
+        let editingRow = table.rect(ofRow: bottomRow)
+        print("— bottom row, editing —")
+        print("  visible=\(editingVisible)  row=\(editingRow)")
+        check(
+            editingRow.maxY <= editingVisible.maxY + 0.5,
+            "the editor's end (\(editingRow.maxY)) should be visible (viewport ends \(editingVisible.maxY))"
+        )
+
+        // A row already fully on screen needs no scroll at all.
+        selection.endEditing()
+        settle()
+        guard let topNote = store.activeNotes.first,
+              let topRow = table.coordinator?.rows.firstIndex(of: .note(topNote.id)) else { return }
+        table.scrollRowToVisible(0)
+        settle()
+        let restingOrigin = clipView.documentVisibleRect.minY
+        selection.selectSingle(topNote.id)
+        selection.beginEditing(id: topNote.id, text: topNote.text)
+        settle()
+        check(
+            abs(clipView.documentVisibleRect.minY - restingOrigin) < 0.5,
+            "editing an already-visible top row should not scroll "
+                + "(was \(restingOrigin), now \(clipView.documentVisibleRect.minY), row \(table.rect(ofRow: topRow)))"
+        )
+        selection.endEditing()
+        settle()
+
+        // ⌘E over several notes at once: the reveal follows the last one
+        // affected, and lands minimally even though earlier rows resized too.
+        let notes = store.activeNotes
+        guard notes.count >= 2 else { return }
+        let batch = Set(notes.suffix(2).map(\.id))
+        table.scrollRowToVisible(0)
+        settle()
+        selection.toggleExpanded(ids: batch)
+        settle()
+        let batchVisible = clipView.documentVisibleRect
+        let batchRow = table.rect(ofRow: bottomRow)
+        print("— multi-expand —")
+        print("  visible=\(batchVisible)  lastRow=\(batchRow)")
+        check(
+            batchRow.maxY <= batchVisible.maxY + 0.5,
+            "expanding several notes should reveal the last one's bottom "
+                + "(\(batchRow.maxY) vs viewport end \(batchVisible.maxY))"
+        )
+        selection.toggleExpanded(ids: batch)
+        settle()
     }
 
     // MARK: - Harness plumbing

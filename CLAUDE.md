@@ -33,6 +33,7 @@ A native macOS note capture app, a clipboard that remembers: double-Shift grabs 
   - Row content reads its note out of the store by id, so a cell that stays put across a list update can't render a stale `Note`. (This replaced an older rule about never using `LazyVStack`, which existed to dodge exactly that staleness.)
   - Row heights come from `tableView(_:heightOfRow:)` over a cache, **not** `usesAutomaticRowHeights` — that was tried and leaves every row at the height it first measured. And each cell pins its content's width in SwiftUI (`.frame(width:)`) before hosting it: `NSHostingView` reports the content's *ideal* size, and a `Text`'s ideal size is its unwrapped single line, so an unpinned multi-line note measures one line tall. Both are verified by `NICKEL_UI_PROBE=1` (see Commands); re-run it after touching row sizing.
   - Nothing measures or re-hosts content inside a layout pass. `heightOfRow` is a pure cache lookup and every measurement happens on a deferred turn; measuring inline re-enters Auto Layout and crashes.
+  - A row growing and the list scrolling to reveal it are **one** animation. Both happen inside the height flush's single `NSAnimationContext` group, so don't add a scroll anywhere that reacts to the growth afterwards (the inline editor used to, and it read as two separate motions).
 - Nickel is a standard Dock-icon app, not `LSUIElement`.
 - Storage is local-only by design: a local JSON file, no accounts, no sync, no cloud.
 

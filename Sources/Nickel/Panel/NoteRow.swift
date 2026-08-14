@@ -366,27 +366,11 @@ private struct InlineNoteEditorField: NSViewRepresentable {
             guard let view else { return }
             view.window?.makeFirstResponder(view)
             view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
-            // The reveal itself is coordinated by `PanelView`: entering an
-            // edit that would grow past the viewport issues an animated
-            // `scrollTo(_, anchor: .bottom)` in the same spring as the
-            // row's growth (an AppKit-level scroll here would be overridden
-            // — SwiftUI's `ScrollView` owns its offset while its layout is
-            // animating). This deferred pass is only a correctness
-            // backstop, after the spring has settled: a no-op when the
-            // coordinated scroll landed, a small correction if the height
-            // estimate it used was off. It reveals the caret plus the
-            // card's bottom chrome (13pt padding + 2pt stroke) that
-            // `scrollRangeToVisible` alone stops short of.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak view] in
-                guard let view, view.window != nil else { return }
-                view.window?.layoutIfNeeded()
-                view.scrollRangeToVisible(view.selectedRange())
-                let bottomChrome: CGFloat = 15
-                view.scrollToVisible(NSRect(
-                    x: 0, y: view.bounds.maxY,
-                    width: view.bounds.width, height: bottomChrome
-                ))
-            }
+            // No scrolling from here. Revealing the caret is the list's job
+            // and it does it in the same animation as the row's growth (see
+            // `NoteListCoordinator.applyPendingReveal`) — a scroll issued
+            // here would land after that animation as a separate, jarring
+            // second motion.
         }
         return view
     }
