@@ -444,138 +444,32 @@ struct PanelView: View {
             // content (rather than inline, like the "Show All" headers
             // below) so it stays visible even when the section is empty.
             if let activeSection = store.activeSection {
-                sectionHeader(activeSection)
+                SectionHeader(name: activeSection)
                     .padding(.bottom, 12)
                     .transition(sectionSwitchTransition)
             }
 
-            GeometryReader { geometry in
-                ScrollViewReader { scrollProxy in
-                    ScrollView {
-                        ZStack(alignment: .top) {
-                            Color.clear
-                                .contentShape(Rectangle())
-                                .onTapGesture { handleBackgroundClick() }
-
-                            if let activeSection = store.activeSection {
-                                let items = selection.notes(in: activeSection)
-                                if items.isEmpty {
-                                    emptySectionHint
-                                        .frame(maxWidth: .infinity, minHeight: geometry.size.height)
-                                        .transition(sectionSwitchTransition)
-                                } else {
-                                    // Not lazy: see the comment on the Show All
-                                    // `VStack` below for why.
-                                    VStack(alignment: .leading, spacing: 10) {
-                                        ForEach(items) { note in
-                                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                                .transition(rowTransition)
-                                        }
-                                    }
-                                    .transition(sectionSwitchTransition)
-                                    .animation(rowSpring, value: selection.visibleOrder)
-                                    .animation(rowSpring, value: selection.expandedIDs)
-                                }
-                            } else {
-                                // Deliberately not lazy: rows migrate between the
-                                // ungrouped and per-section ForEach loops when a
-                                // note is moved into a section, and LazyVStack's
-                                // per-identity cell cache would keep serving the
-                                // pre-move Note snapshot (stale done-checkbox).
-                                // These lists are small, so laziness buys nothing.
-                                let grouped = selection.filteredNotesBySection
-                                VStack(alignment: .leading, spacing: 10) {
-                                    ForEach(grouped[String?.none] ?? []) { note in
-                                        NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                            .transition(rowTransition)
-                                    }
-
-                                    // Every section's header renders here, even
-                                    // an empty one: with `sections` as the source
-                                    // of truth for existence, Show All is where
-                                    // an empty section can be found, reordered,
-                                    // or deleted. No per-section empty hint
-                                    // though — that would clutter a view meant to
-                                    // stay a clean overview.
-                                    ForEach(store.sections, id: \.self) { sectionName in
-                                        sectionHeader(sectionName)
-                                            .padding(.top, 12)
-                                            .transition(rowTransition)
-
-                                        ForEach(grouped[sectionName] ?? []) { note in
-                                            NoteRow(note: note) { store.toggleDone(ids: [note.id]) }
-                                                .transition(rowTransition)
-                                        }
-                                    }
-                                }
-                                .transition(sectionSwitchTransition)
-                                .animation(rowSpring, value: selection.visibleOrder)
-                                // Expand/collapse changes a row's height without
-                                // adding or removing it from `visibleOrder`, so
-                                // it needs its own `.animation` keyed off
-                                // `expandedIDs` to pick up the same spring.
-                                .animation(rowSpring, value: selection.expandedIDs)
-                                // Reordering two sections that are both empty (or
-                                // otherwise don't change which note ids are
-                                // visible) wouldn't otherwise change
-                                // `visibleOrder`, so the headers need their own
-                                // animation keyed off section order directly.
-                                .animation(rowSpring, value: store.sections)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
-                    }
+            if let activeSection = store.activeSection, selection.notes(in: activeSection).isEmpty {
+                emptySectionHint
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(sectionSwitchTransition)
+            } else {
+                // The list itself is a view-based `NSTableView`
+                // (`NoteListTable`): native selection, keyboard navigation,
+                // contextual menus and scrolling, with each row's content
+                // still drawn in SwiftUI.
+                NoteListTable(mode: .notes)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .coordinateSpace(name: SelectionModel.viewportSpaceName)
-                    // Keyboard navigation (arrow keys) keeps the lead row
-                    // visible, matching `NSTableView.scrollRowToVisible`: no
-                    // anchor (scrolls the minimal distance to the nearest
-                    // edge) and no animation (AppKit's keyboard-nav scrolling
-                    // is instant). Clicks and select-all don't set
-                    // `revealRequest`, so they don't trigger this.
-                    .onChange(of: selection.revealRequest) { _, request in
-                        guard let request else { return }
-                        scrollProxy.scrollTo(request.id)
-                    }
-                    // Entering an edit grows the row to its full text (the
-                    // preview is clamped to 3 lines); when that growth would
-                    // run past the viewport bottom, scroll in the same
-                    // spring the growth animates with, so the card opens and
-                    // the list glides in one coordinated motion with the
-                    // caret's end-of-note position landing on screen. Rows
-                    // that still fit don't scroll at all. Height is
-                    // estimated from the note's text (`editedRowHeight`);
-                    // the editor's own deferred reveal backstops any
-                    // estimate error.
-                    .onChange(of: selection.editingID) { _, editingID in
-                        guard let editingID,
-                              let note = store.activeNotes.first(where: { $0.id == editingID }),
-                              let rowFrame = selection.rowViewportFrames[editingID] else { return }
-                        let finalBottom = rowFrame.minY + editedRowHeight(text: note.text, rowWidth: rowFrame.width)
-                        guard finalBottom > geometry.size.height else { return }
-                        // Deferred a turn: issued directly in `onChange`,
-                        // `scrollTo` computes its target from the row's
-                        // pre-growth layout and lands short. One turn later
-                        // the layout is final, and the scroll's spring still
-                        // overlaps the growth's almost entirely.
-                        DispatchQueue.main.async {
-                            withAnimation(.noteRowSpring) {
-                                scrollProxy.scrollTo(editingID, anchor: .bottom)
-                            }
-                        }
-                    }
-                }
+                    .transition(sectionSwitchTransition)
             }
         }
         // Drives both the pinned header's appearance/disappearance and the
-        // swap between the focused-section view and "Show All" with the same
-        // spring used for row insert/delete/move, so switching sections
-        // (menu, ⌘K, or a composer "#" chip) animates instead of
-        // hard-cutting. The
-        // composer/search bar don't move: `noteList` already fills a fixed
-        // slice of the outer `VStack`, so the header's appearance only
-        // resizes the `GeometryReader` below it, not the panel around it.
-        .animation(rowSpring, value: store.activeSection)
+        // swap between the focused-section view and "Show All", so switching
+        // sections (menu, ⌘K, or a composer "#" chip) animates instead of
+        // hard-cutting. The composer/search bar don't move: `noteList`
+        // already fills a fixed slice of the outer `VStack`, so the header's
+        // appearance only resizes the list below it, not the panel around it.
+        .animation(.noteRowSpring, value: store.activeSection)
     }
 
     /// Shown below the pinned header when the active section has no notes
@@ -586,144 +480,23 @@ struct PanelView: View {
             .foregroundStyle(.tertiary)
     }
 
-    /// Gentle spring used for note insert/delete/move and section
-    /// appearance, keyed off the flat visible order so any change to which
-    /// notes are shown (or in what order) animates.
-    private var rowSpring: Animation { .noteRowSpring }
-
-    /// Estimated on-screen height of `text`'s row once inline editing shows
-    /// the full text: the text measured at the row's content width (row
-    /// minus 14pt horizontal padding each side, the 19pt checkbox, and its
-    /// 12pt gap) plus the 13pt vertical padding each side. Matches the
-    /// editor's own metrics (`InlineNoteEditorField.textAttributes`); used
-    /// only to decide whether entering the edit needs a coordinated scroll,
-    /// so small error is fine — the editor's deferred reveal corrects it.
-    private func editedRowHeight(text: String, rowWidth: CGFloat) -> CGFloat {
-        let textWidth = max(rowWidth - 28 - 19 - 12, 50)
-        let style = NSMutableParagraphStyle()
-        style.lineSpacing = 2
-        let textHeight = NSAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: 14),
-            .paragraphStyle: style,
-        ]).boundingRect(
-            with: NSSize(width: textWidth, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin]
-        ).height
-        return ceil(textHeight) + 26
-    }
-
-    private var rowTransition: AnyTransition {
-        .opacity.combined(with: .scale(scale: 0.96, anchor: .top))
-    }
-
     /// Used for the pinned header and the list content it swaps with when
-    /// `store.activeSection` changes, subtler than `rowTransition` since it's
-    /// covering a whole-view swap rather than a single row.
+    /// `store.activeSection` changes: a subtle fade + scale, since it covers
+    /// a whole-view swap rather than a single row.
     private var sectionSwitchTransition: AnyTransition {
         .opacity.combined(with: .scale(scale: 0.98, anchor: .top))
     }
 
-    private func sectionHeader(_ sectionName: String) -> some View {
-        let isRenaming = selection.renamingSectionName == sectionName
-
-        return HStack(spacing: 8) {
-            if isRenaming {
-                ZStack(alignment: .leading) {
-                    // Invisible sizing text: makes the ZStack's width track
-                    // the live edit buffer, so the field auto-grows/shrinks
-                    // with typing instead of sitting at a fixed width.
-                    Text(selection.renameText.isEmpty ? " " : selection.renameText)
-                        .font(.system(size: 11, weight: .semibold))
-                        .opacity(0)
-                        .fixedSize()
-
-                    HeaderRenameField(
-                        text: Binding(
-                            get: { selection.renameText },
-                            set: { selection.renameText = $0 }
-                        ),
-                        onCommit: { commitHeaderRename(from: sectionName) },
-                        onCancel: { selection.endRenamingSection() }
-                    )
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(maxWidth: .infinity)
-                }
-                .frame(minWidth: 60, maxWidth: 240, alignment: .leading)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 2)
-                .background(
-                    RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                )
-            } else {
-                Text(sectionName.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
-                    .tracking(0.8)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
-                    .contentShape(Rectangle())
-                    .onTapGesture(count: 2) { selection.beginRenamingSection(sectionName) }
-            }
-
-            Rectangle()
-                .fill(.quaternary)
-                .frame(height: 1)
-        }
-        .contextMenu {
-            Button("Rename Section") { selection.beginRenamingSection(sectionName) }
-
-            Divider()
-
-            Button("Move Up") { store.moveSection(sectionName, offset: -1) }
-                .disabled(store.sections.first == sectionName)
-            Button("Move Down") { store.moveSection(sectionName, offset: 1) }
-                .disabled(store.sections.last == sectionName)
-
-            Divider()
-
-            Button("Clear Done in Section") { store.clearDone(in: sectionName) }
-                .disabled(!hasDoneNotes(inSection: sectionName))
-
-            Divider()
-
-            // Dissolve keeps the notes (ungrouping them) and never asks;
-            // Delete Section… also keeps the notes by default (moving them to
-            // the Logbook) but offers permanent deletion as the destructive
-            // alternative in its confirmation — kept as separate,
-            // clearly-labeled items rather than one "Delete" that's
-            // ambiguous about which it means.
-            Button("Dissolve Section") { store.dissolveSection(sectionName) }
-
-            Button("Delete Section…", role: .destructive) {
-                actions.requestDeleteSection(sectionName)
-            }
-        }
-    }
-
-    private func hasDoneNotes(inSection name: String) -> Bool {
-        store.activeNotes.contains { $0.isDone && $0.listName == name }
-    }
-
-    /// Shared empty-area click handler: resigns first responder (which
-    /// commits any in-progress header rename, Finder-style, via its
-    /// `textDidEndEditing` path) then explicitly commits any in-progress note
-    /// edit and clears the selection.
-    ///
-    /// Note edit commit is explicit rather than relying solely on
-    /// `makeFirstResponder(nil)`: the note editor is now a SwiftUI
-    /// `TextField` with `@FocusState`, which AppKit's `makeFirstResponder`
-    /// doesn't reliably resign (SwiftUI manages its own focus state
-    /// independently of the responder chain in some cases), so `NoteRow`'s
-    /// `.onChange(of: editFocus)` commit path isn't guaranteed to fire here.
+    /// Click on the panel's own background (outside the list, composer and
+    /// top bar): resigns first responder — which commits any in-progress
+    /// header rename, Finder-style, via its `textDidEndEditing` path — then
+    /// commits any in-progress note edit and clears the selection. The same
+    /// three steps run for a click below the last row, in
+    /// `NoteListCoordinator.handleBackgroundClick`.
     private func handleBackgroundClick() {
         NSApp.keyWindow?.makeFirstResponder(nil)
         actions.commitActiveEditIfAny()
         selection.clear()
-    }
-
-    private func commitHeaderRename(from oldName: String) {
-        store.renameSection(from: oldName, to: selection.renameText)
-        selection.endRenamingSection()
     }
 
     /// Whether there's at least one done note in the current scope (the

@@ -15,51 +15,12 @@ struct LogbookView: View {
             header
                 .padding(.bottom, 12)
 
-            GeometryReader { geometry in
-                ScrollViewReader { scrollProxy in
-                ScrollView {
-                    ZStack(alignment: .top) {
-                        Color.clear
-                            .contentShape(Rectangle())
-                            .onTapGesture { selection.clear() }
-
-                        if groups.isEmpty {
-                            emptyState
-                                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
-                        } else {
-                            // Plain VStack, like the note list: these are the
-                            // same rows under a different heading, and the
-                            // list is small enough that laziness buys nothing.
-                            // Spacing is a touch wider than the live list's:
-                            // flat rows (no card fill) need the extra gap so
-                            // adjacent notes don't read as touching.
-                            VStack(alignment: .leading, spacing: 14) {
-                                ForEach(groups, id: \.day) { group in
-                                    dayHeader(group.day)
-                                        .padding(.top, group.day == groups.first?.day ? 0 : 12)
-
-                                    ForEach(group.notes) { note in
-                                        LogbookRow(note: note)
-                                    }
-                                }
-
-                                footerNote
-                                    .padding(.top, 8)
-                            }
-                            .animation(.noteRowSpring, value: selection.visibleOrder)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, minHeight: geometry.size.height, alignment: .top)
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                .coordinateSpace(name: SelectionModel.viewportSpaceName)
-                // Arrow-key navigation keeps the lead row visible, exactly
-                // as the note list does.
-                .onChange(of: selection.revealRequest) { _, request in
-                    guard let request else { return }
-                    scrollProxy.scrollTo(request.id)
-                }
-                }
+            if selection.filteredNotes.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                NoteListTable(mode: .logbook)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
     }
@@ -83,12 +44,13 @@ struct LogbookView: View {
             .foregroundStyle(.tertiary)
             .multilineTextAlignment(.center)
     }
+}
 
-    /// macOS-Notes-"Recently Deleted"-style footer: explains that the
-    /// Logbook doesn't purge itself, since there's no other hint of that
-    /// anywhere in the panel. Scrolls with the content, sitting after the
-    /// last day group.
-    private var footerNote: some View {
+/// macOS-Notes-"Recently Deleted"-style footer: explains that the Logbook
+/// doesn't purge itself, since there's no other hint of that anywhere in the
+/// panel. Scrolls with the content, sitting after the last day group.
+struct LogbookFooter: View {
+    var body: some View {
         Text("Cleared notes stay here until you delete them.")
             .font(.caption)
             .foregroundStyle(.tertiary)
@@ -96,26 +58,13 @@ struct LogbookView: View {
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.bottom, 8)
     }
+}
 
-    // MARK: - Day grouping
+/// One day group's label, styled like a section header.
+struct LogbookDayHeader: View {
+    let day: Date
 
-    /// The archived notes (search-filtered, newest-cleared first — see
-    /// `SelectionModel.filteredNotes`) split into one group per day cleared.
-    /// Built from that same order, so the flat sequence of rows on screen
-    /// matches `visibleOrder` exactly and keyboard navigation lines up.
-    private var groups: [(day: Date, notes: [Note])] {
-        let calendar = Calendar.current
-        var order: [Date] = []
-        var notesByDay: [Date: [Note]] = [:]
-        for note in selection.filteredNotes {
-            let day = calendar.startOfDay(for: note.archivedAt ?? note.createdAt)
-            if notesByDay[day] == nil { order.append(day) }
-            notesByDay[day, default: []].append(note)
-        }
-        return order.map { (day: $0, notes: notesByDay[$0] ?? []) }
-    }
-
-    private func dayHeader(_ day: Date) -> some View {
+    var body: some View {
         HStack(spacing: 8) {
             Text(Self.dayFormatter.string(from: day).uppercased())
                 .font(.system(size: 11, weight: .semibold))
@@ -184,19 +133,22 @@ private struct LogbookBackButton: View {
 
 /// One Logbook row: the note card's look without any of its editing — the
 /// checkbox is a static indicator, double-click does nothing, and the
-/// context menu offers only "Put Back" and "Delete Permanently".
-private struct LogbookRow: View {
-    let note: Note
+/// context menu (built by `NoteContextMenu`) offers only "Put Back" and
+/// "Delete Permanently".
+struct LogbookRowContent: View {
+    let noteID: UUID
 
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
     @Environment(\.controlActiveState) private var controlActiveState
 
-    private var isSelected: Bool { selection.selectedIDs.contains(note.id) }
+    private var note: Note? { store.notes.first { $0.id == noteID } }
 
-    /// Same emphasized/unemphasized pair `NoteRow` uses, so a Logbook row
-    /// selected behind an inactive panel dims like any other list row.
+    private var isSelected: Bool { selection.selectedIDs.contains(noteID) }
+
+    /// Same emphasized/unemphasized pair `NoteRowContent` uses, so a Logbook
+    /// row selected behind an inactive panel dims like any other list row.
     private var selectionStroke: Color {
         controlActiveState == .key
             ? .accentColor
@@ -204,19 +156,25 @@ private struct LogbookRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        if let note {
+            row(note)
+        }
+    }
+
+    private func row(_ note: Note) -> some View {
+        HStack(alignment: .top, spacing: NoteRowMetrics.checkboxContentSpacing) {
             Image(systemName: note.isDone ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 19, weight: .light))
+                .font(.system(size: NoteRowMetrics.checkboxWidth, weight: .light))
                 .foregroundStyle(note.isDone ? .secondary : .quaternary)
-                .frame(height: 19)
+                .frame(height: NoteRowMetrics.checkboxWidth)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: note.text.isEmpty ? 0 : 8) {
                 if !note.text.isEmpty {
-                    // Same dimming vocabulary `NoteRow` uses for a done note
-                    // (`.primary` + 0.5 opacity, no strikethrough) — every
-                    // Logbook note is settled, so it always reads that way,
-                    // not just the ones that happened to be checked off.
+                    // Same dimming vocabulary `NoteRowContent` uses for a done
+                    // note (`.primary` + 0.5 opacity, no strikethrough) —
+                    // every Logbook note is settled, so it always reads that
+                    // way, not just the ones that happened to be checked off.
                     Text(MarkdownCache.collapsedPreview(for: note.text))
                         .font(.system(size: 14))
                         .lineSpacing(2)
@@ -230,62 +188,45 @@ private struct LogbookRow: View {
                 if !note.attachments.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(note.attachments) { attachment in
-                            attachmentCard(attachment)
+                            attachmentCard(attachment, in: note)
                         }
                     }
                 }
             }
         }
-        // Same pattern as `NoteRow.noteRowAccessibility`: one combined
+        // Same pattern as `NoteRowContent`'s accessibility: one combined
         // element, the done state as its value, and the row's two menu items
         // as named actions (hover/right-click reach neither by keyboard).
         .accessibilityElement(children: .combine)
         .accessibilityValue(note.isDone ? "Done" : "Not Done")
         .accessibilityAction(named: Text("Put Back")) { actions.restore(ids: targetIDs) }
         .accessibilityAction(named: Text("Delete Permanently")) { actions.requestPermanentDelete(ids: targetIDs) }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 13)
-        // Flat, not a card: no fill at all, unlike `NoteRow`'s opaque
+        .padding(.horizontal, NoteRowMetrics.horizontalPadding)
+        .padding(.vertical, NoteRowMetrics.verticalPadding)
+        // Flat, not a card: no fill at all, unlike `NoteRowContent`'s opaque
         // `.textBackgroundColor` card. The Logbook is a settled record, not
         // another active list, so its rows shouldn't compete with the live
         // list's elevated look — the day headers above carry the structure
         // instead. Selection still reads clearly via the stroke below, the
-        // same style `NoteRow` uses.
+        // same style the live list uses.
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
                 .strokeBorder(selectionStroke, lineWidth: 2)
                 .opacity(isSelected ? 1 : 0)
         )
-        .background(RightClickPreSelector { actions.selectOnRightClick(note.id) })
-        .contentShape(Rectangle())
-        .onTapGesture {
-            NSApp.keyWindow?.makeFirstResponder(nil)
-            let flags = NSEvent.modifierFlags
-            selection.handleClick(on: note.id, shift: flags.contains(.shift), command: flags.contains(.command))
-        }
-        .contextMenu {
-            Button("Put Back") { actions.restore(ids: targetIDs) }
-
-            Divider()
-
-            Button("Delete Permanently", role: .destructive) {
-                actions.requestPermanentDelete(ids: targetIDs)
-            }
-        }
-        .id(note.id)
     }
 
     /// The notes a menu item acts on: the whole selection when this row is
     /// part of it (right-clicking an unselected row selects only it first —
     /// see `PanelActions.selectOnRightClick`), otherwise just this row.
     private var targetIDs: Set<UUID> {
-        selection.selectedIDs.contains(note.id) ? selection.selectedIDs : [note.id]
+        selection.selectedIDs.contains(noteID) ? selection.selectedIDs : [noteID]
     }
 
-    /// The compact icon + filename card `NoteRow` uses for non-image (or
-    /// multiple) attachments. The Logbook shows every attachment this way:
+    /// The compact icon + filename card `NoteRowContent` uses for non-image
+    /// (or multiple) attachments. The Logbook shows every attachment this way:
     /// its rows are a record, not a place to work with files.
-    private func attachmentCard(_ attachment: Attachment) -> some View {
+    private func attachmentCard(_ attachment: Attachment, in note: Note) -> some View {
         HStack(spacing: 8) {
             AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 28)
                 .frame(width: 28, height: 28)

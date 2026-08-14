@@ -25,7 +25,10 @@ A native macOS note capture app, a clipboard that remembers: double-Shift grabs 
 
 ## Deliberate decisions — do not "fix"
 
-- Note lists use plain `VStack`, never `LazyVStack`. Rows migrate between the ungrouped and per-section `ForEach` loops when a note moves into a section, and `LazyVStack`'s per-identity cell cache would keep serving the pre-move `Note` snapshot (stale done-checkbox). See the comment at `Sources/Nickel/Panel/PanelView.swift:312-318`.
+- The note list and the Logbook are a view-based `NSTableView` (`Sources/Nickel/Panel/NoteListTable.swift`), not a SwiftUI `ScrollView`. The table owns click, ⇧-click, ⌘-click, arrows, ⌘A, right-click's `clickedRow` and scrolling; row *content* is still SwiftUI, hosted per cell. Two rules keep that working, and neither is safe to "tidy away":
+  - A row's hosting view returns `nil` from `hitTest` unless it needs clicks itself (a section header, or the one note being edited). SwiftUI content would otherwise swallow every click and the table would never see one.
+  - The selected look is the 2pt outline drawn by the row's own SwiftUI content; `NoteListRowView` suppresses AppKit's default filled highlight. Don't swap in the default.
+  - Row content reads its note out of the store by id, so a cell that stays put across a list update can't render a stale `Note`. (This replaced an older rule about never using `LazyVStack`, which existed to dodge exactly that staleness.)
 - Nickel is a standard Dock-icon app, not `LSUIElement`.
 - Storage is local-only by design: a local JSON file, no accounts, no sync, no cloud.
 

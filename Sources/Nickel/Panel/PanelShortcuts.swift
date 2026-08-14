@@ -65,6 +65,11 @@ struct PanelShortcut {
     /// context-dependent — see `FloatingPanel.handle` — so it's panel logic
     /// only, never surfaced as a menu shortcut).
     let menuShortcut: KeyboardShortcut?
+    /// The same hint as `menuShortcut`, spelled for `NSMenuItem`: the note
+    /// row's contextual menu is an `NSMenu` now (see `NoteContextMenu`), and
+    /// SwiftUI's `KeyboardShortcut` can't be read back out for it. Present
+    /// exactly when `menuShortcut` is — asserted by `PanelShortcutsTests`.
+    let menuKeyEquivalent: (key: String, modifiers: NSEvent.ModifierFlags)?
     /// `nil` for commands the shortcuts card doesn't list on their own.
     /// Escape isn't shown in the card at all; the arrows are shown as one
     /// combined "Move selection" row, assembled by `ShortcutsOverlay` from
@@ -78,72 +83,84 @@ enum PanelShortcuts {
             command: .moveDown,
             match: .keyCode(125, modifiers: nil),
             menuShortcut: nil,
+            menuKeyEquivalent: nil,
             overlay: ("Move selection", ["↓"])
         ),
         PanelShortcut(
             command: .moveUp,
             match: .keyCode(126, modifiers: nil),
             menuShortcut: nil,
+            menuKeyEquivalent: nil,
             overlay: ("Move selection", ["↑"])
         ),
         PanelShortcut(
             command: .edit,
             match: .keyCode(36, modifiers: []),
             menuShortcut: KeyboardShortcut(.return, modifiers: []),
+            menuKeyEquivalent: ("\r", []),
             overlay: ("Edit note", ["↩"])
         ),
         PanelShortcut(
             command: .editInNewWindow,
             match: .keyCode(36, modifiers: [.command]),
             menuShortcut: KeyboardShortcut(.return, modifiers: .command),
+            menuKeyEquivalent: ("\r", .command),
             overlay: ("Edit in new window", ["⌘", "↩"])
         ),
         PanelShortcut(
             command: .toggleDone,
             match: .keyCode(49, modifiers: nil),
             menuShortcut: KeyboardShortcut(" ", modifiers: []),
+            menuKeyEquivalent: (" ", []),
             overlay: ("Toggle done", ["Space"])
         ),
         PanelShortcut(
             command: .delete,
             match: .keyCodes([51, 117], modifiers: []),
             menuShortcut: KeyboardShortcut(.delete, modifiers: []),
+            menuKeyEquivalent: ("\u{8}", []),
             overlay: ("Delete", ["⌫"])
         ),
         PanelShortcut(
             command: .moveToLogbook,
             match: .keyCodes([51, 117], modifiers: [.option]),
             menuShortcut: KeyboardShortcut(.delete, modifiers: .option),
+            menuKeyEquivalent: ("\u{8}", .option),
             overlay: ("Move to Logbook", ["⌥", "⌫"])
         ),
         PanelShortcut(
             command: .escape,
             match: .keyCode(53, modifiers: nil),
             menuShortcut: nil,
+            menuKeyEquivalent: nil,
             overlay: nil
         ),
         PanelShortcut(
             command: .copy,
             match: .character("c", modifiers: [.command]),
             menuShortcut: KeyboardShortcut("c", modifiers: .command),
+            menuKeyEquivalent: ("c", .command),
             overlay: ("Copy", ["⌘", "C"])
         ),
         PanelShortcut(
             command: .toggleExpanded,
             match: .character("e", modifiers: [.command]),
             menuShortcut: KeyboardShortcut("e", modifiers: .command),
+            menuKeyEquivalent: ("e", .command),
             overlay: ("Expand/collapse", ["⌘", "E"])
         ),
         PanelShortcut(
             command: .copyAsList,
             match: .character("c", modifiers: [.command, .shift]),
             menuShortcut: KeyboardShortcut("c", modifiers: [.command, .shift]),
+            menuKeyEquivalent: ("c", [.command, .shift]),
             overlay: ("Copy as list", ["⇧", "⌘", "C"])
         ),
         PanelShortcut(
             command: .merge,
             match: .character("m", modifiers: [.command, .shift]),
             menuShortcut: KeyboardShortcut("m", modifiers: [.command, .shift]),
+            menuKeyEquivalent: ("m", [.command, .shift]),
             overlay: ("Merge notes", ["⇧", "⌘", "M"])
         )
     ]

@@ -14,12 +14,11 @@ enum PanelOverlay: Equatable {
     case shortcuts
 }
 
-/// A request to scroll a given note into view, raised only by keyboard
-/// navigation (never clicks or select-all — AppKit's `NSTableView` doesn't
-/// auto-scroll for those either). `token` is regenerated on every request so
-/// repeated arrow presses that land on the same lead row (e.g. hitting the
-/// top/bottom boundary) still produce a distinct `Equatable` value and fire
-/// `.onChange`.
+/// A request to scroll a given note into view, raised when expanding a row
+/// discloses content that would otherwise open below the viewport — never by
+/// clicks, select-all or the arrows, which the table already handles. `token`
+/// is regenerated on every request so two requests for the same row still
+/// produce distinct `Equatable` values and are both acted on.
 struct RevealRequest: Equatable {
     let id: UUID
     let token = UUID()
@@ -34,9 +33,13 @@ struct SectionDeleteConfirmation: Identifiable, Equatable {
     var id: String { name }
 }
 
-/// Shared selection/editing state for the note list, plus the click and
-/// keyboard-navigation logic that operates over the panel's current flat
-/// visible (filtered, grouped) order of notes.
+/// Shared selection/editing state for the note list, and the derivation of
+/// the panel's current flat visible (filtered, grouped) order of notes.
+///
+/// `selectedIDs` is the app-facing source of truth every command reads, but
+/// the *input* that changes it — click, ⇧-click, ⌘-click, arrows, ⌘A — belongs
+/// to the list's `NSTableView`, which bridges its native selection back here
+/// (see `NoteListCoordinator`).
 final class SelectionModel: ObservableObject {
     /// `SelectionModel` and `NoteStore` are both created once, in
     /// `FloatingPanel`'s init, and live for the app's lifetime — there's no
@@ -122,32 +125,11 @@ final class SelectionModel: ObservableObject {
     /// to an empty string before a separate sync pass fills it in).
     @Published var renameText: String = ""
 
-    /// Set only by keyboard navigation (`moveSelection`) and by expansion
-    /// (`toggleExpanded`), never by clicks or select-all, so `PanelView` can
-    /// scroll the affected row into view the way `NSTableView` keyboard nav
-    /// and Finder's expand-a-folder disclosure would — and only then.
+    /// A row the list should scroll into view. Raised by expansion
+    /// (`toggleExpanded`), never by clicks or select-all — arrow-key
+    /// navigation doesn't need it either, since `NSTableView` keeps the lead
+    /// row visible on its own.
     @Published private(set) var revealRequest: RevealRequest?
-
-    /// Name of the coordinate space `PanelView` attaches to the note list's
-    /// scroll viewport, so rows can report viewport-relative frames.
-    static let viewportSpaceName = "noteListViewport"
-
-    /// Each visible row's current frame in the viewport coordinate space,
-    /// kept up to date by `NoteRow`. Deliberately not `@Published` — frames
-    /// change on every scroll tick and nothing renders from them; they're
-    /// read on demand (e.g. deciding whether entering an edit needs a
-    /// coordinated scroll).
-    var rowViewportFrames: [UUID: CGRect] = [:]
-
-    /// The last note explicitly clicked or navigated to; the anchor for
-    /// shift-click and shift-arrow range selection.
-    private var anchorID: UUID?
-
-    /// The moving end of the current range selection (the last note reached
-    /// by shift-arrow or shift-click). Arrow keys step from here, not from
-    /// the anchor — otherwise repeated shift-arrows could never grow the
-    /// range past the anchor's immediate neighbor.
-    private var leadID: UUID?
 
     init(store: NoteStore) {
         self.store = store
@@ -188,12 +170,6 @@ final class SelectionModel: ObservableObject {
 
     private func pruneToExisting(ids: Set<UUID>) {
         selectedIDs = selectedIDs.intersection(ids)
-        if let anchorID, !ids.contains(anchorID) {
-            self.anchorID = nil
-        }
-        if let leadID, !ids.contains(leadID) {
-            self.leadID = nil
-        }
         if let editingID, !ids.contains(editingID) {
             endEditing()
         }
@@ -253,95 +229,23 @@ final class SelectionModel: ObservableObject {
         return ids
     }
 
-    // MARK: - Click handling
+    // MARK: - Programmatic selection
+    //
+    // Click, ⇧-click, ⌘-click, the arrows and ⇧-arrows are all
+    // `NSTableView`'s now (see `NoteListTable`), which is also where the
+    // anchor/lead bookkeeping range selection needs lives. What's left here is
+    // the selection *state* the rest of the app reads, plus the few places
+    // that set it outright.
 
-    /// Single entry point for a click on a note card; `shift`/`command`
-    /// reflect the modifier keys held at click time.
-    func handleClick(on id: UUID, shift: Bool, command: Bool) {
-        if shift {
-            if anchorID == nil {
-                selectSingle(id)
-            } else {
-                extendRange(to: id)
-            }
-        } else if command {
-            toggle(id)
-        } else {
-            selectSingle(id)
-        }
-    }
-
+    /// Replaces the selection with one note — after a merge, after a delete
+    /// picks the nearest survivor, and when a double-click opens an edit.
     func selectSingle(_ id: UUID) {
         selectedIDs = [id]
-        anchorID = id
-        leadID = id
     }
 
-    func toggle(_ id: UUID) {
-        if selectedIDs.contains(id) {
-            selectedIDs.remove(id)
-        } else {
-            selectedIDs.insert(id)
-        }
-        anchorID = id
-        leadID = id
-    }
-
-    private func extendRange(to id: UUID) {
-        guard let anchorID,
-              let anchorIndex = visibleOrder.firstIndex(of: anchorID),
-              let targetIndex = visibleOrder.firstIndex(of: id) else {
-            selectSingle(id)
-            return
-        }
-        let range = anchorIndex <= targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
-        selectedIDs = Set(visibleOrder[range])
-        // Anchor stays put so further shift-clicks keep extending from the same origin.
-        leadID = id
-    }
-
-    /// Click on empty space: clears the selection.
+    /// Click on empty space, Escape, or a section/Logbook switch.
     func clear() {
         selectedIDs = []
-        anchorID = nil
-        leadID = nil
-    }
-
-    // MARK: - Keyboard navigation
-
-    /// Moves (or extends) the selection by `direction` (+1 down, -1 up)
-    /// through the flat visible order.
-    func moveSelection(direction: Int, extend: Bool) {
-        guard !visibleOrder.isEmpty else { return }
-
-        guard let referenceID = leadID ?? anchorID ?? selectedIDs.first,
-              let currentIndex = visibleOrder.firstIndex(of: referenceID) else {
-            let entryID = direction < 0 ? visibleOrder[visibleOrder.count - 1] : visibleOrder[0]
-            selectSingle(entryID)
-            revealRequest = RevealRequest(id: entryID)
-            return
-        }
-
-        let newIndex = min(max(currentIndex + direction, 0), visibleOrder.count - 1)
-        let newID = visibleOrder[newIndex]
-
-        if extend {
-            if anchorID == nil {
-                anchorID = referenceID
-            }
-            extendRange(to: newID)
-        } else {
-            selectSingle(newID)
-        }
-
-        // Always raise a reveal request for the (possibly unchanged) lead
-        // row, including at the top/bottom boundary: `NSTableView` keeps the
-        // selected row visible on every arrow press, and re-requesting the
-        // same row is harmless (`ScrollViewReader.scrollTo` is a no-op if
-        // it's already on screen) while skipping it would leave a boundary
-        // row that scrolled out of view via some other means (e.g. a resize)
-        // stranded off-screen.
-        revealRequest = RevealRequest(id: newID)
     }
 
     // MARK: - Inline editing
@@ -398,7 +302,7 @@ final class SelectionModel: ObservableObject {
             // bottom would disclose its content off-screen; reveal it the
             // way Finder's outline view reveals newly disclosed children.
             // Collapse needs no reveal — the row only shrinks.
-            if let target = leadID.flatMap({ ids.contains($0) ? $0 : nil }) ?? ids.first {
+            if let target = visibleOrder.last(where: { ids.contains($0) }) {
                 revealRequest = RevealRequest(id: target)
             }
         }
@@ -421,10 +325,11 @@ final class SelectionModel: ObservableObject {
 
     // MARK: - Select all
 
+    /// Backs ⌘A when the list itself doesn't have focus (the Edit menu's
+    /// Select All targets the window then). With the list focused, the table
+    /// handles ⌘A natively and this state follows through the bridge.
     func selectAllNotes() {
         guard !visibleOrder.isEmpty else { return }
         selectedIDs = Set(visibleOrder)
-        anchorID = visibleOrder.first
-        leadID = visibleOrder.last
     }
 }
