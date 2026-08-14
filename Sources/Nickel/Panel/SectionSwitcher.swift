@@ -194,65 +194,10 @@ struct SectionSwitcher: View {
 
     // MARK: - Results
 
-    /// A single row in the palette's result list. `id` is a stable label
-    /// (rather than an index) so `ForEach` diffs correctly as the query — and
-    /// therefore the result set — changes on every keystroke. `.showAll` only
-    /// appears in switch mode, `.noSection` only in move mode — see `results`.
-    private enum Result: Identifiable {
-        case showAll
-        case section(String)
-        case noSection
-        case newSection(String)
-        case command(PaletteCommand)
-
-        var id: String {
-            switch self {
-            case .showAll: return "show-all"
-            case .section(let name): return "section:\(name)"
-            case .noSection: return "no-section"
-            case .newSection(let name): return "new:\(name)"
-            case .command(let command): return "command:\(command.title)"
-            }
-        }
-
-        var isCommand: Bool {
-            if case .command = self { return true }
-            return false
-        }
-
-        var group: PaletteGroup { isCommand ? .command : .section }
-    }
-
-    /// Switch mode: "Show All" (if it matches), then every matching section,
-    /// then — for a non-empty query that isn't already an exact
-    /// (case-insensitive) section name — a trailing "New Section" row.
-    ///
-    /// Move mode: the same list with "No Section" (ungroup the selection)
-    /// standing in for "Show All" — there's no "Show All" destination to
-    /// move notes into.
+    /// Thin wrapper over `SectionSwitcherLogic.results` with this view's live
+    /// state — see that function's doc comment for the mode semantics.
     private var results: [Result] {
-        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        var candidates: [Result] = [move ? .noSection : .showAll]
-        candidates += store.sections.map { .section($0) }
-        candidates += PaletteCommand.applicable(in: paletteContext).map { .command($0) }
-
-        var items = PaletteMatcher.ranked(
-            candidates,
-            query: trimmedQuery,
-            group: { $0.group },
-            label: { label(for: $0) }
-        )
-
-        // The "New Section" row closes out the destination list, exactly
-        // where it sat before commands existed: after every matching
-        // section, above the command block.
-        if !trimmedQuery.isEmpty, !store.sections.contains(where: { $0.caseInsensitiveCompare(trimmedQuery) == .orderedSame }) {
-            let insertionIndex = items.firstIndex { $0.isCommand } ?? items.count
-            items.insert(.newSection(trimmedQuery), at: insertionIndex)
-        }
-
-        return items
+        SectionSwitcherLogic.results(sections: store.sections, move: move, query: query, paletteContext: paletteContext)
     }
 
     /// The state the command list's visibility rules read; see
@@ -284,40 +229,24 @@ struct SectionSwitcher: View {
     }
 
     private func label(for result: Result) -> String {
-        switch result {
-        case .showAll: return "Show All"
-        case .section(let name): return name
-        case .noSection: return "No Section"
-        case .newSection(let name): return "New Section: “\(name)”"
-        case .command(let command): return command.title
-        }
+        SectionSwitcherLogic.label(for: result)
     }
 
-    /// Every section every currently-selected note belongs to, collapsed to
-    /// a single value only when it's the same section (or ungrouped, `nil`)
-    /// for *all* of them. The outer optional distinguishes "no uniform
-    /// answer" (empty or mixed selection — no checkmark should show) from
-    /// "uniform answer is ungrouped" (inner `nil` — `.noSection` should
-    /// check).
+    /// Thin wrapper over `SectionSwitcherLogic.uniformSelectionSection` —
+    /// see that function's doc comment for what the double optional means.
     private var uniformSelectionSection: String?? {
-        let sections = Set(store.activeNotes.filter { selection.selectedIDs.contains($0.id) }.map(\.listName))
-        return sections.count == 1 ? sections.first : nil
+        SectionSwitcherLogic.uniformSelectionSection(
+            selectedListNames: store.activeNotes.filter { selection.selectedIDs.contains($0.id) }.map(\.listName)
+        )
     }
 
     private func isActive(_ result: Result) -> Bool {
-        if move {
-            guard let uniformSection = uniformSelectionSection else { return false }
-            switch result {
-            case .section(let name): return uniformSection == name
-            case .noSection: return uniformSection == nil
-            case .showAll, .newSection, .command: return false
-            }
-        }
-        switch result {
-        case .showAll: return store.activeSection == nil
-        case .section(let name): return store.activeSection == name
-        case .noSection, .newSection, .command: return false
-        }
+        SectionSwitcherLogic.isActive(
+            result,
+            move: move,
+            uniformSelectionSection: uniformSelectionSection,
+            activeSection: store.activeSection
+        )
     }
 
     // MARK: - Interaction
@@ -332,53 +261,46 @@ struct SectionSwitcher: View {
         commit(results[highlightedIndex])
     }
 
+    /// Executes the pure `SectionSwitcherLogic.commitAction` mapping for
+    /// `result`; a `nil` action is a `(Result, move)` combination `results`
+    /// never actually produces, so it's a no-op commit (just dismiss).
     private func commit(_ result: Result) {
-        if move {
-            // Move mode never touches `store.activeSection`:
-            // `actions.move(toSection:)` only reassigns `listName` on the
-            // already-selected notes (and then clears the selection). That
-            // includes the "New Section" row — unlike switch mode's
-            // `createSection`, which also activates the new section,
-            // `NoteStore.move` already appends an unrecognized name to
-            // `sections` on its own, so there's nothing else to do here.
-            switch result {
-            case .section(let name):
-                actions.move(toSection: name)
-            case .noSection:
-                actions.move(toSection: nil)
-            case .newSection(let name):
-                actions.move(toSection: name)
-            case .showAll, .command:
-                break // Never produced by `results` in move mode.
-            }
+        guard let action = SectionSwitcherLogic.commitAction(for: result, move: move) else {
             dismiss()
             return
         }
 
-        // Picking any destination leaves the Logbook: it lists cleared
-        // notes, not a section's live ones, so switching sections behind it
-        // would leave the panel showing something else entirely.
-        switch result {
-        case .showAll:
-            selection.setShowingLogbook(false)
-            store.setActiveSection(nil)
-        case .section(let name):
+        switch action {
+        case .move(let name):
+            actions.move(toSection: name)
+            dismiss()
+        case .moveCreate(let name):
+            // `actions.move(toSection:)` only reassigns `listName` on the
+            // already-selected notes (and then clears the selection);
+            // `NoteStore.move` already appends an unrecognized name to
+            // `sections` on its own, so `.moveCreate` needs nothing more
+            // than the same call — unlike switch mode's `createSection`,
+            // which also activates the new section.
+            actions.move(toSection: name)
+            dismiss()
+        case .switchTo(let name):
+            // Picking any destination leaves the Logbook: it lists cleared
+            // notes, not a section's live ones, so switching sections behind
+            // it would leave the panel showing something else entirely.
             selection.setShowingLogbook(false)
             store.setActiveSection(name)
-        case .newSection(let name):
+            dismiss()
+        case .create(let name):
             selection.setShowingLogbook(false)
             store.createSection(named: name)
-        case .command(let command):
+            dismiss()
+        case .run(let command):
             // Dismiss first: some commands hand focus to another control
             // (an inline rename field) or raise a confirmation dialog, and
             // neither can happen behind the palette.
             dismiss()
             run(command)
-            return
-        case .noSection:
-            break // Never produced by `results` in switch mode.
         }
-        dismiss()
     }
 
     private func run(_ command: PaletteCommand) {
