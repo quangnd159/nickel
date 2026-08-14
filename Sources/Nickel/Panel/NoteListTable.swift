@@ -85,41 +85,12 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// animation as the height change that made it necessary.
     private var pendingReveal: PendingReveal?
 
-    /// What a reveal has to put on screen.
-    enum PendingReveal {
-        /// The whole row — expanding discloses all of it.
-        case row(NoteListRow)
-        /// Just the row's end — opening an inline edit parks the caret there.
-        case rowEnd(NoteListRow)
-
-        var row: NoteListRow {
-            switch self {
-            case .row(let row), .rowEnd(let row): return row
-            }
-        }
-
-        /// The height of the end sliver a `rowEnd` reveal asks for, measured
-        /// up from the row's bottom. Shared with the editor's own caret follow
-        /// so opening an edit and typing in it agree to the point.
-        static var endSliverHeight: CGFloat {
-            NoteRowMetrics.caretRevealHeight()
-        }
-
-        func rect(in rowRect: NSRect) -> NSRect {
-            switch self {
-            case .row:
-                return rowRect
-            case .rowEnd:
-                let height = min(rowRect.height, Self.endSliverHeight)
-                return NSRect(
-                    x: rowRect.minX,
-                    y: rowRect.maxY - height,
-                    width: rowRect.width,
-                    height: height
-                )
-            }
-        }
-    }
+    /// What a reveal has to put on screen: the whole row, minimally —
+    /// expanding and opening an inline edit both disclose the row, and both
+    /// scroll the least that shows it (a row taller than the viewport pins
+    /// its top). The editor's caret can start off screen in a very long
+    /// note; `NSTextView` reveals it natively on the first keystroke.
+    typealias PendingReveal = NoteListRow
 
     /// Cells that have reported a new ideal height, batched until the end of
     /// the runloop turn so one settling pass costs one retile. Held as cells
@@ -560,7 +531,10 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
         let animates = animatesPendingHeightChange
         animatesPendingHeightChange = false
-        guard !indexes.isEmpty || pendingReveal != nil else { return }
+        guard !indexes.isEmpty || pendingReveal != nil else {
+            selection.releaseCollapseHold()
+            return
+        }
 
         // One transaction for both motions. `noteHeightOfRows` retiles
         // immediately and animates according to the surrounding context (view
@@ -568,14 +542,19 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         // documented way to suppress that), so the reveal below can read the
         // new row geometry and animate the scroll alongside the growth
         // instead of chasing it afterwards.
-        NSAnimationContext.runAnimationGroup { context in
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = (animates && !Motion.isReduced) ? 0.24 : 0
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             if !indexes.isEmpty {
                 tableView.noteHeightOfRows(withIndexesChanged: indexes)
             }
             applyPendingReveal()
-        }
+        }, completionHandler: { [weak self] in
+            // Collapsing rows kept rendering their full content while the
+            // card animated shut (`SelectionModel.collapseHold`); the card is
+            // closed now, so the swap to the preview happens out of sight.
+            self?.selection.releaseCollapseHold()
+        })
     }
 
     /// Notes a row that should be brought into view once the height change
@@ -583,15 +562,17 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// to run in the same animation as the growth, or the list moves twice.
     private func notePendingReveal() {
         if let editingID = selection.editingID, editingID != lastEditingID {
-            // Opening an inline edit puts the caret at the end of the note, so
-            // the end is what has to be on screen.
-            pendingReveal = .rowEnd(.note(editingID))
+            // Same policy as expanding: disclose the row, scrolling the
+            // least that shows it. Chasing the caret (at the note's end)
+            // instead used to drag a tall card upward while it was still
+            // growing downward — two opposing motions at once.
+            pendingReveal = .note(editingID)
             scheduleHeightFlush()
         }
         guard let request = selection.revealRequest, request.token != lastRevealToken else { return }
         lastRevealToken = request.token
         // Expanding discloses the whole note; the reveal covers the row.
-        pendingReveal = .row(.note(request.id))
+        pendingReveal = .note(request.id)
         scheduleHeightFlush()
     }
 
@@ -613,9 +594,9 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         guard visible.height > 0 else { return }
 
         var targetY = visible.minY
-        if let reveal, let row = rows.firstIndex(of: reveal.row) {
+        if let reveal, let row = rows.firstIndex(of: reveal) {
             let rowRect = tableView.rect(ofRow: row)
-            if let revealed = Self.revealOrigin(for: reveal.rect(in: rowRect), in: visible) {
+            if let revealed = Self.revealOrigin(for: rowRect, in: visible) {
                 targetY = revealed
             }
         }
@@ -649,8 +630,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// rule, but leaves what happens to an oversized rect undefined, so the
     /// too-tall case is spelled out here rather than inherited: a rect taller
     /// than the viewport pins its top, which shows the start of whatever was
-    /// just disclosed. An inline edit doesn't hit that case — it asks for a
-    /// sliver at the row's end, never the whole row.
+    /// just disclosed.
     static func revealOrigin(for rect: NSRect, in visible: NSRect) -> CGFloat? {
         if rect.height >= visible.height { return rect.minY }
         if rect.maxY > visible.maxY { return rect.maxY - visible.height }

@@ -128,6 +128,22 @@ final class SelectionModel: ObservableObject {
     /// store), toggled via the context menu's "Expand"/"Collapse" or ⌘E.
     @Published var expandedIDs: Set<UUID> = []
 
+    /// Rows mid-collapse: they keep rendering the content the card is
+    /// closing over until the table's height animation completes
+    /// (`NoteListCoordinator` releases the hold from the animation's
+    /// completion), then snap to the 3-line preview — invisibly, because the
+    /// card has already shut over it. Without the hold, the tall content
+    /// vanishes on the first frame and the card animates shut around
+    /// nothing, which reads as "collapse doesn't animate".
+    /// `expanded` keeps the full Markdown rendering (⌘E collapse);
+    /// `edited` keeps the unclamped text (closing an inline edit).
+    struct CollapseHold: Equatable {
+        var expanded: Set<UUID> = []
+        var edited: Set<UUID> = []
+        var isEmpty: Bool { expanded.isEmpty && edited.isEmpty }
+    }
+    @Published private(set) var collapseHold = CollapseHold()
+
     /// The section name currently in inline section-header rename mode, if
     /// any (set by `PanelActions.createSectionWithSelection()` for a
     /// just-created section, by the ⋯ menu's "New Section", or by
@@ -275,13 +291,28 @@ final class SelectionModel: ObservableObject {
     // the text jumping.
 
     func beginEditing(id: UUID, text: String) {
+        collapseHold.expanded.remove(id)
+        collapseHold.edited.remove(id)
         editingID = id
         editingText = text
     }
 
     func endEditing() {
+        // A collapsed note shrinks back to its preview; hold the full text
+        // on screen until the card has animated shut over it. An expanded
+        // note keeps its full rendering — nothing shrinks, no hold.
+        if let id = editingID, !expandedIDs.contains(id) {
+            collapseHold.edited.insert(id)
+        }
         editingID = nil
         editingText = ""
+    }
+
+    /// Called by the table when the height animation a collapse started has
+    /// completed (or was skipped entirely under Reduce Motion).
+    func releaseCollapseHold() {
+        guard !collapseHold.isEmpty else { return }
+        collapseHold = CollapseHold()
     }
 
     // MARK: - Section rename
@@ -356,8 +387,11 @@ final class SelectionModel: ObservableObject {
         guard !ids.isEmpty else { return }
         if ids.isSubset(of: expandedIDs) {
             expandedIDs.subtract(ids)
+            collapseHold.expanded.formUnion(ids)
         } else {
             expandedIDs.formUnion(ids)
+            collapseHold.expanded.subtract(ids)
+            collapseHold.edited.subtract(ids)
             // Expansion grows the row downward, so a note near the viewport
             // bottom would disclose its content off-screen; reveal it the
             // way Finder's outline view reveals newly disclosed children.

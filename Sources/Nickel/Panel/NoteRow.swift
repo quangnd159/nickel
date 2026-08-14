@@ -246,6 +246,19 @@ struct NoteRowContent: View {
 
     private var isExpanded: Bool { selection.expandedIDs.contains(noteID) }
 
+    /// While this row's collapse animation runs, it keeps rendering the
+    /// content the card is closing over (`SelectionModel.collapseHold`) so
+    /// the shrinking card visibly conceals it, instead of the content
+    /// vanishing a frame before the card moves. Measurement ignores the
+    /// hold: the row's height must be the collapsed height it is animating
+    /// toward.
+    private var holdsExpandedContent: Bool {
+        !isMeasurementOnly && selection.collapseHold.expanded.contains(noteID)
+    }
+    private var holdsUnclampedText: Bool {
+        !isMeasurementOnly && selection.collapseHold.edited.contains(noteID)
+    }
+
     @ViewBuilder
     private func displayText(_ note: Note) -> some View {
         // An attachment-only note (no text) skips the text view entirely
@@ -253,7 +266,7 @@ struct NoteRowContent: View {
         // an awkward blank line above the attachments.
         VStack(alignment: .leading, spacing: note.text.isEmpty ? 0 : 8) {
             if !note.text.isEmpty {
-                if isExpanded {
+                if isExpanded || holdsExpandedContent {
                     // Full Markdown rendering: headings, lists, blockquotes
                     // and code blocks get their own block styling; nothing is
                     // line-clamped.
@@ -270,7 +283,10 @@ struct NoteRowContent: View {
                         .font(.system(size: 14))
                         .lineSpacing(2)
                         .foregroundStyle(.primary)
-                        .lineLimit(3)
+                        // Unclamped while a just-closed edit's card animates
+                        // shut, so the card conceals the text instead of the
+                        // text truncating a frame ahead of it.
+                        .lineLimit(holdsUnclampedText ? nil : 3)
                         .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .opacity(note.isDone ? 0.5 : 1)
@@ -474,10 +490,9 @@ private struct InlineNoteEditorField: NSViewRepresentable {
     /// Answers SwiftUI's size proposal synchronously — measuring the text at
     /// the proposed width — instead of leaving height to
     /// `intrinsicContentSize`, which is only correct one layout pass later
-    /// (the container width isn't known at creation). Same-pass sizing is
-    /// what lets `SelectionModel.beginEditing`'s spring interpolate the
-    /// row's growth; the deferred intrinsic path landed outside the animated
-    /// transaction and snapped.
+    /// (the container width isn't known at creation). Same-pass sizing keeps
+    /// the editor at its full height from the first frame, so the table's
+    /// height animation reveals it instead of chasing a late measurement.
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: InlineNoteTextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         let measured = NSAttributedString(string: nsView.string, attributes: Self.textAttributes)

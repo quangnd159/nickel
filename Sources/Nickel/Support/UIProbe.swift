@@ -42,7 +42,7 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
     """
 
     /// Long enough that its inline editor is taller than the whole viewport,
-    /// so the reveal has to pick which end of the row to show.
+    /// so the reveal pins the row's top and the caret starts off screen.
     private static let veryLongNoteText = Array(repeating: longNoteText, count: 3).joined(separator: "\n\n")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -406,9 +406,17 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             "collapsing must not strand the scroll past the content "
                 + "(visible ends \(collapsedVisible.maxY), content \(table.frame.height))"
         )
+        // The collapse hold (full content kept on screen while the card
+        // shuts) must be released once the height flush completes — a leaked
+        // hold would leave the row clipping its full text forever.
+        check(
+            selection.collapseHold.isEmpty,
+            "the collapse hold should be released after the collapse settles"
+        )
 
-        // Beginning an edit on the bottom note must put the editor's end —
-        // where the caret sits — on screen.
+        // Beginning an edit on the bottom note reveals the row like ⌘E does;
+        // this editor fits the viewport, so its end (and the caret) lands on
+        // screen.
         selection.selectSingle(bottomNote.id)
         selection.beginEditing(id: bottomNote.id, text: bottomNote.text)
         settle()
@@ -469,9 +477,11 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The case the shorter notes above never reach: an editor taller than the
-    /// viewport. The caret is on the last line, and the card has to be visibly
-    /// closed under it — bottom padding, stroke and the full corner radius —
-    /// not cut off at the viewport's edge.
+    /// viewport. Opening the edit pins the row's top (the ⌘E policy — no
+    /// upward drag while the row grows); the first keystroke then follows the
+    /// caret natively, with the card visibly closed under it — bottom
+    /// padding, stroke and the full corner radius — not cut off at the
+    /// viewport's edge.
     private func checkTallEditReveal(
         table: NoteListTableView,
         store: NoteStore,
@@ -528,25 +538,14 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             "the probe's tall note should actually exceed the viewport "
                 + "(row \(rowRect.height), viewport \(visible.height))"
         )
+        // Same policy as ⌘E: a row taller than the viewport pins its top, so
+        // the card never gets dragged upward while it is growing downward.
+        // Two-sided on purpose — over- and under-shoot both mean the row was
+        // revealed at a height it doesn't have.
         check(
-            card.maxY <= visible.maxY + 0.5,
-            "the card's bottom edge (\(card.maxY)) must be inside the viewport (ends \(visible.maxY))"
-        )
-        // The corner radius is the deepest part of the card's bottom edge, so
-        // seeing the whole corner is what "visibly closed" means.
-        check(
-            card.maxY - NoteRowMetrics.cornerRadius >= visible.minY,
-            "the card's bottom corners should be fully on screen "
-                + "(corner starts \(card.maxY - NoteRowMetrics.cornerRadius), viewport starts \(visible.minY))"
-        )
-        // Two-sided on purpose. Scrolling too far is as wrong as too short,
-        // and both come from the same fault — a row revealed at a height it
-        // doesn't have. Under-measure and the card lands below the viewport
-        // (clipped); over-measure and the list overshoots past it.
-        check(
-            abs(rowRect.maxY - visible.maxY) < 0.5,
-            "the reveal should seat the row's bottom exactly on the viewport's "
-                + "(row ends \(rowRect.maxY), viewport ends \(visible.maxY))"
+            abs(rowRect.minY - visible.minY) < 0.5,
+            "a taller-than-viewport editor should pin the row's top to the viewport's "
+                + "(row starts \(rowRect.minY), viewport starts \(visible.minY))"
         )
 
         // Typing is the case that actually bites: `NSTextView` reveals the
@@ -566,13 +565,19 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
                 "typing on the last line must keep the card's bottom edge visible "
                     + "(card ends \(typedCard.maxY), viewport ends \(typedVisible.maxY))"
             )
-            // The point of the whole exercise: opening the edit has to land
-            // exactly where the caret-follow reveal would, so the first
-            // keystroke moves nothing at all.
+            // The caret starts off screen (the reveal pinned the row's top);
+            // `NSTextView`'s native caret follow must bring it into view on
+            // the first keystroke, with the card's bottom chrome closed
+            // under it (the `scrollRangeToVisible` override).
             check(
-                clipView.bounds.origin.y == beforeTyping,
-                "the first keystroke must not scroll at all "
+                clipView.bounds.origin.y > beforeTyping,
+                "the first keystroke must scroll down to the caret "
                     + "(was \(beforeTyping), now \(clipView.bounds.origin.y))"
+            )
+            check(
+                typedCard.maxY - NoteRowMetrics.cornerRadius >= typedVisible.minY,
+                "the card's bottom corners should be fully on screen after typing "
+                    + "(corner starts \(typedCard.maxY - NoteRowMetrics.cornerRadius), viewport starts \(typedVisible.minY))"
             )
 
             #if DEBUG
