@@ -143,7 +143,7 @@ struct LogbookRowContent: View {
     @EnvironmentObject private var actions: PanelActions
     @Environment(\.controlActiveState) private var controlActiveState
 
-    private var note: Note? { store.notes.first { $0.id == noteID } }
+    private var note: Note? { store.notesByID[noteID] }
 
     private var isSelected: Bool { selection.selectedIDs.contains(noteID) }
 

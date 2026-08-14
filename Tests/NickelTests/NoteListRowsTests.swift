@@ -111,10 +111,10 @@ final class NoteListRowsTests: XCTestCase {
 
         let calendar = Calendar.current
         XCTAssertEqual(rows, [
-            .dayHeader(calendar.startOfDay(for: day)),
+            .dayHeader(calendar.startOfDay(for: day), isFirst: true),
             .note(first.id),
             .note(second.id),
-            .dayHeader(calendar.startOfDay(for: earlier)),
+            .dayHeader(calendar.startOfDay(for: earlier), isFirst: false),
             .note(third.id),
             .logbookFooter,
         ])

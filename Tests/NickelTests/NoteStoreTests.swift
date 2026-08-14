@@ -22,6 +22,41 @@ final class NoteStoreTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - notesByID
+
+    /// `notesByID` is a maintained cache, not derived on read — this checks
+    /// it never drifts from `notes` across every mutation that changes the
+    /// array, including one (`merge`) that mutates via subscript rather than
+    /// a whole-array reassignment.
+    func testNotesByIDStaysInSyncAcrossMutations() {
+        func assertInSync(_ label: String, line: UInt = #line) {
+            XCTAssertEqual(store.notesByID.count, store.notes.count, label, line: line)
+            for note in store.notes {
+                XCTAssertEqual(store.notesByID[note.id]?.id, note.id, "\(label): \(note.id)", line: line)
+            }
+        }
+
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        assertInSync("after add")
+
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+
+        store.move(ids: [idA], toSection: "Work")
+        assertInSync("after move")
+
+        store.markDone(ids: [idA])
+        assertInSync("after markDone")
+
+        store.merge(ids: [idA, idB])
+        assertInSync("after merge")
+        let survivorID = store.notes[0].id
+
+        store.delete(ids: [survivorID])
+        assertInSync("after delete")
+    }
+
     // MARK: - add
 
     func testAddCapsTextAtMaxLengthWithEllipsis() {
