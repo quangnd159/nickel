@@ -37,8 +37,10 @@ A native macOS note capture app, a clipboard that remembers: double-Shift grabs 
 - Drag to reorder (`Sources/Nickel/Panel/NoteListDrop.swift` + the drag section of `NoteListTable.swift`) has its own rules:
   - `validateDrop` and `acceptDrop` both go through `NoteListDrop.resolve`, so what the drop indicator promises and what the store is told can't disagree. Don't let one of them grow its own logic.
   - `acceptDrop` mutates the store and lets the normal diff move the rows. No `moveRow(at:to:)` — that would make the table a second source of truth for note order.
-  - No positional drops while a search filter is active: the note above a gap on screen isn't the note above it in the list. Drops **onto a section header** stay allowed, since "into this section, at its end" is unambiguous either way. Reminders disables filtered reordering for the same reason.
-  - Dropping onto a section header is the only way to reach a section with no notes. Don't remove it as redundant.
+  - **No drops while a search filter is active.** Every drop is positional, and the note above a gap on screen isn't the note above it in the list. Reminders disables filtered reordering for the same reason.
+  - **Nothing is an on-row drop target** — not notes, not section headers. Every drop lands in a gap between rows (`draggingDestinationFeedbackStyle = .gap`), and a proposed `.on` is retargeted to `.above`. That's why there's no `drawDraggingDestinationFeedback(in:)` override: with no on-row targets it would have no caller.
+  - An **empty section** is reached by the gap directly below its header, which is why `.above` a header resolves to the section of the row *above* it — and when that row is itself a header, to that header's own empty section. Consecutive empty sections each get their own gap. Don't "simplify" that case away.
+  - `tableView(_:heightOfRow:)` must stay a pure cache lookup that schedules nothing for out-of-range rows: `.gap` asks about rows that aren't in the model while it opens a drop gap.
   - The Logbook is neither drag source nor drop target, and drags from other apps into the list are not accepted — the composer's own drop area (`ComposerDropView.swift`) handles those, and it is deliberately AppKit-level.
   - Local drags are `.move`, external drags `.copy`; rows also carry `.string`, so dragging a note into another app pastes its text.
 - Nickel is a standard Dock-icon app, not `LSUIElement`.

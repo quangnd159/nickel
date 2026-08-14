@@ -32,9 +32,9 @@ enum NoteListDrop {
     }
 
     /// - Parameters:
-    ///   - isFiltering: a search is narrowing the list. Positions between rows
-    ///     mean nothing then — the note above the gap on screen isn't the note
-    ///     above it in the list — so only whole-section drops stay available.
+    ///   - isFiltering: a search is narrowing the list. Every drop position is
+    ///     ambiguous then — the note above a gap on screen isn't the note above
+    ///     it in the list — so nothing is a valid target.
     ///   - draggedIDs: the notes being dragged, so a drop onto them is refused
     ///     rather than promised and then quietly ignored.
     static func resolve(
@@ -48,20 +48,14 @@ enum NoteListDrop {
     ) -> Resolution {
         // The Logbook is a record, not a list to arrange.
         guard mode == .notes else { return .reject }
+        guard !isFiltering else { return .reject }
         guard rows.indices.contains(proposedRow) || proposedRow == rows.count else { return .reject }
 
-        if operation == .on {
-            // Dropping onto a section header puts the notes in that section,
-            // at its end. It's also the only way to reach a section with no
-            // notes to drop between.
-            if rows.indices.contains(proposedRow), case .sectionHeader(let name) = rows[proposedRow] {
-                return .accept(
-                    row: proposedRow,
-                    operation: .on,
-                    target: NoteListDropTarget(section: name, beforeID: nil)
-                )
-            }
-            // Notes aren't containers: a drop onto one becomes a drop above it.
+        // Every drop lands between rows. Nothing here is a container to drop
+        // *onto* — not even a section header, which is reached instead by the
+        // gap immediately below it — so a proposed on-row drop becomes a drop
+        // above that row.
+        guard operation == .above else {
             return resolve(
                 rows: rows,
                 proposedRow: proposedRow,
@@ -72,8 +66,6 @@ enum NoteListDrop {
                 draggedIDs: draggedIDs
             )
         }
-
-        guard !isFiltering else { return .reject }
 
         let target: NoteListDropTarget
         if proposedRow == rows.count {
@@ -90,7 +82,10 @@ enum NoteListDrop {
                     beforeID: id
                 )
             case .sectionHeader:
-                // The gap above a header belongs to the block that just ended.
+                // The gap above a header belongs to the block that just ended
+                // — which, when the row above is itself a header, is that
+                // header's own (empty) section. That's how a section with no
+                // notes is reached: the gap directly below its header.
                 target = NoteListDropTarget(
                     section: section(endingAt: proposedRow - 1, in: rows, activeSection: activeSection),
                     beforeID: nil

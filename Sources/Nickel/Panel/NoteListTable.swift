@@ -185,7 +185,11 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
             // app copies its text instead.
             table.setDraggingSourceOperationMask(.move, forLocal: true)
             table.setDraggingSourceOperationMask(.copy, forLocal: false)
-            table.draggingDestinationFeedbackStyle = .regular
+            // The drop position opens as a gap and the rows around it move
+            // apart, rather than an insertion line being drawn between them.
+            // Only ever meaningful with `.above` drops, which is all this list
+            // has — see `NoteListDrop`.
+            table.draggingDestinationFeedbackStyle = .gap
         }
 
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
@@ -346,6 +350,10 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// assertion. Rows with no height yet get a provisional one and are
     /// measured on the next runloop turn instead.
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        // Out of range without scheduling anything: the table asks about rows
+        // that aren't in the model while `.gap` feedback opens a drop gap
+        // mid-drag, and measuring in response would put a layout pass in the
+        // middle of a drag for a row that doesn't exist.
         guard rows.indices.contains(row) else { return Self.provisionalRowHeight }
         guard let cached = rowHeights[rows[row]] else {
             scheduleHeightFlush()
@@ -959,28 +967,9 @@ final class NoteListRowView: NSTableRowView {
     /// content must always draw as normal.
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 
-    /// The "drop into this section" highlight, drawn when a drag hovers a
-    /// section header.
-    ///
-    /// Written out rather than left to AppKit for shape, not visibility:
-    /// `drawDraggingDestinationFeedback(in:)` is documented as independent of
-    /// `drawSelection`/`drawBackground`, so suppressing those doesn't suppress
-    /// this. But the default draws a plain full-width rect, which sits oddly
-    /// against a list of inset, 16pt-rounded cards. This matches them.
-    override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
-        guard isTargetForDropOperation else { return }
-        let rect = bounds.insetBy(dx: 2, dy: 1)
-        let path = NSBezierPath(
-            roundedRect: rect,
-            xRadius: NoteRowMetrics.cornerRadius,
-            yRadius: NoteRowMetrics.cornerRadius
-        )
-        NSColor.controlAccentColor.withAlphaComponent(0.15).setFill()
-        path.fill()
-        NSColor.controlAccentColor.setStroke()
-        path.lineWidth = 2
-        path.stroke()
-    }
+    // No `drawDraggingDestinationFeedback(in:)` override: nothing in this list
+    // is ever an on-row drop target, so it has no caller. Drops land in gaps
+    // between rows, which the table draws by moving the rows apart.
 }
 
 /// Catches clicks that land in the scroll view but below the last row — the

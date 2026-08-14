@@ -81,28 +81,58 @@ final class NoteListDropTests: XCTestCase {
         XCTAssertEqual(target(resolve(rows: rows, row: 3)), NoteListDropTarget(section: "Work", beforeID: nil))
     }
 
-    // MARK: - Onto rows
+    // MARK: - Empty sections, reached by the gap below their header
 
-    func testDropOntoASectionHeaderMovesIntoThatSectionAtItsEnd() {
-        let resolution = resolve(row: 2, operation: .on)
-        XCTAssertEqual(target(resolution), NoteListDropTarget(section: "Work", beforeID: nil))
-        guard case .accept(let row, let operation, _) = resolution else { return XCTFail("rejected") }
-        XCTAssertEqual(row, 2)
-        XCTAssertEqual(operation, .on, "the header itself is the drop target, so it highlights")
+    /// A section with no notes has no gaps of its own, so the one directly
+    /// below its header — which is the gap above whatever follows — is how it's
+    /// reached. Here "Later" is empty and last, so that gap is the end of the
+    /// list.
+    func testAnEmptySectionAtTheEndIsReachedByTheGapBelowItsHeader() {
+        XCTAssertEqual(target(resolve(row: 6)), NoteListDropTarget(section: "Later", beforeID: nil))
     }
 
-    /// The only way to reach a section with no notes to drop between.
-    func testDropOntoAnEmptySectionsHeader() {
-        XCTAssertEqual(target(resolve(row: 5, operation: .on)), NoteListDropTarget(section: "Later", beforeID: nil))
+    /// Two empty sections in a row: each header's following gap belongs to that
+    /// header's own section, not to the block before them both.
+    func testConsecutiveEmptySectionsEachGetTheirOwnGap() {
+        let c1 = UUID()
+        let rows: [NoteListRow] = [
+            .note(u1),              // 0
+            .sectionHeader("A"),    // 1  empty
+            .sectionHeader("B"),    // 2  empty
+            .sectionHeader("C"),    // 3
+            .note(c1),              // 4
+        ]
+        // Above A's header: still the ungrouped block.
+        XCTAssertEqual(target(resolve(rows: rows, row: 1)), NoteListDropTarget(section: nil, beforeID: nil))
+        // Below A's header (= above B's): into A.
+        XCTAssertEqual(target(resolve(rows: rows, row: 2)), NoteListDropTarget(section: "A", beforeID: nil))
+        // Below B's header (= above C's): into B.
+        XCTAssertEqual(target(resolve(rows: rows, row: 3)), NoteListDropTarget(section: "B", beforeID: nil))
+        // Below C's header: the start of C, in front of its first note.
+        XCTAssertEqual(target(resolve(rows: rows, row: 4)), NoteListDropTarget(section: "C", beforeID: c1))
+        // Past the end: the end of C.
+        XCTAssertEqual(target(resolve(rows: rows, row: 5)), NoteListDropTarget(section: "C", beforeID: nil))
     }
 
-    /// Notes aren't containers, so AppKit's proposed "on" becomes "above".
-    func testDropOntoANoteIsRetargetedToAboveIt() {
-        let resolution = resolve(row: 3, operation: .on)
-        guard case .accept(let row, let operation, let target) = resolution else { return XCTFail("rejected") }
-        XCTAssertEqual(row, 3)
-        XCTAssertEqual(operation, .above)
-        XCTAssertEqual(target, NoteListDropTarget(section: "Work", beforeID: w1))
+    /// The gap below a non-empty section's header is the start of that section,
+    /// in front of its first note — not the end of the block above.
+    func testTheGapBelowANonEmptySectionsHeaderIsThatSectionsStart() {
+        XCTAssertEqual(target(resolve(row: 3)), NoteListDropTarget(section: "Work", beforeID: w1))
+    }
+
+    // MARK: - Nothing is an on-row target
+
+    /// Not notes, and not section headers either: every drop lands in a gap.
+    func testAProposedOnRowDropBecomesADropAboveThatRow() {
+        for row in [0, 2, 3, 5] {
+            let resolution = resolve(row: row, operation: .on)
+            guard case .accept(let targetRow, let operation, let dropTarget) = resolution else {
+                return XCTFail("row \(row) rejected")
+            }
+            XCTAssertEqual(targetRow, row, "row \(row)")
+            XCTAssertEqual(operation, .above, "row \(row)")
+            XCTAssertEqual(dropTarget, target(resolve(row: row)), "row \(row) should match the .above result")
+        }
     }
 
     // MARK: - A focused section
@@ -121,23 +151,14 @@ final class NoteListDropTests: XCTestCase {
 
     // MARK: - While filtering
 
-    /// Positions between rows mean nothing in a filtered list: the note above
-    /// the gap on screen isn't the note above it in the list.
-    func testFilteringRejectsDropsBetweenRows() {
-        XCTAssertEqual(resolve(row: 1, isFiltering: true), .reject)
-        XCTAssertEqual(resolve(row: 6, isFiltering: true), .reject)
-    }
-
-    /// A whole-section drop is still unambiguous, so it stays available.
-    func testFilteringStillAllowsDropsOntoASectionHeader() {
-        XCTAssertEqual(
-            target(resolve(row: 2, operation: .on, isFiltering: true)),
-            NoteListDropTarget(section: "Work", beforeID: nil)
-        )
-    }
-
-    func testFilteringRejectsADropOntoANoteSinceItBecomesAPositionalDrop() {
-        XCTAssertEqual(resolve(row: 3, operation: .on, isFiltering: true), .reject)
+    /// Every drop position is ambiguous in a filtered list — the note above a
+    /// gap on screen isn't the note above it in the list — and since every drop
+    /// is positional now, filtering refuses all of them.
+    func testFilteringRejectsEveryDrop() {
+        for row in 0...6 {
+            XCTAssertEqual(resolve(row: row, isFiltering: true), .reject, "row \(row)")
+            XCTAssertEqual(resolve(row: row, operation: .on, isFiltering: true), .reject, "row \(row) on")
+        }
     }
 
     // MARK: - Refusals

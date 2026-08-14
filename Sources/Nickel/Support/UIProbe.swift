@@ -263,9 +263,9 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         print("— before the drop —")
         print("  row \(beforeRow) height=\(heightBefore)")
 
-        // Exactly what `acceptDrop` does for a drop onto the "Probe Section"
-        // header: move into that section, at its end, and keep the dragged
-        // notes selected.
+        // Exactly what `acceptDrop` does for a drop in the gap below the
+        // "Probe Section" header — the section is empty, so that gap resolves
+        // to its end — plus keeping the dragged notes selected.
         store.move(ids: [moved.id], toSection: "Probe Section", before: nil)
         selection.selectedIDs = [moved.id]
         settle()
