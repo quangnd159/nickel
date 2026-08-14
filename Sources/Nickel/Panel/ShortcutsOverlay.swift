@@ -1,12 +1,5 @@
 import SwiftUI
 
-/// Posted by `FloatingPanel` when ⌘/ is pressed, toggling the keyboard
-/// shortcuts card's presentation. Mirrors `.nickelToggleSectionSwitcher` in
-/// `SectionSwitcher.swift`.
-extension Notification.Name {
-    static let nickelToggleShortcuts = Notification.Name("NickelToggleShortcuts")
-}
-
 /// A reference card of the panel's keyboard shortcuts, opened via ⌘/ (and
 /// listed in the ⋯ menu). Purely informational — nothing on it is
 /// interactive beyond dismissing it — so unlike `SectionSwitcher` it needs no
@@ -54,22 +47,9 @@ struct ShortcutsOverlay: View {
                 ShortcutRow("Show/hide panel", [panelToggleKeyGlyph, PanelSettings.panelToggleKey.sideWord])
             ])
 
-            group("Navigate", [
-                ShortcutRow("Commands, or switch section", ["⌘", "K"]),
-                ShortcutRow("Move to Section", ["⌃", "⌘", "M"]),
-                ShortcutRow("Next section", ["⇧", "⌘", "]"]),
-                ShortcutRow("Previous section", ["⇧", "⌘", "["]),
-                ShortcutRow("Rename section", ["⇧", "⌘", "R"]),
-                ShortcutRow("Search", ["⌘", "F"]),
-                ShortcutRow("New note", ["⌘", "N"]),
-                moveSelectionRow,
-                ShortcutRow("Keyboard shortcuts", ["⌘", "/"])
-            ])
+            group("Navigate", navigateRows)
 
-            group("Window", [
-                ShortcutRow("Close panel", ["⌘", "W"]),
-                ShortcutRow("Settings", ["⌘", ","])
-            ])
+            group("Window", windowRows(.window))
 
             group("Edit", [
                 overlayRow(.copy),
@@ -158,6 +138,23 @@ struct ShortcutsOverlay: View {
         let up = PanelShortcuts.shortcut(for: .moveUp).overlay!
         let down = PanelShortcuts.shortcut(for: .moveDown).overlay!
         return ShortcutRow(up.label, up.keys + down.keys)
+    }
+
+    /// Every `WindowShortcuts` entry in `group`, in table order, rendered
+    /// from the shared table — see `PanelShortcuts.swift`'s `WindowShortcut`.
+    private func windowRows(_ group: WindowShortcutGroup) -> [ShortcutRow] {
+        WindowShortcuts.all
+            .filter { $0.overlayGroup == group }
+            .map { ShortcutRow($0.overlay.label, $0.overlay.keys) }
+    }
+
+    /// The Navigate group's rows, with "Move selection" (the arrows — see
+    /// `moveSelectionRow`) inserted just before "Keyboard shortcuts", the
+    /// table's last Navigate entry, matching the card's original order.
+    private var navigateRows: [ShortcutRow] {
+        var rows = windowRows(.navigate)
+        rows.insert(moveSelectionRow, at: max(rows.count - 1, 0))
+        return rows
     }
 }
 

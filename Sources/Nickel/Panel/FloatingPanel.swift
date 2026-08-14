@@ -443,57 +443,37 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         let modifiers = event.modifierFlags.intersection([.command, .shift, .option, .control])
         let characters = event.charactersIgnoringModifiers?.lowercased()
 
-        if modifiers == [.command], characters == "k" {
-            NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
-            return true
-        }
-        if modifiers == [.command, .control], characters == "m" {
-            NotificationCenter.default.post(name: .nickelToggleMoveToSection, object: nil)
-            return true
-        }
-        if modifiers == [.command], characters == "/" {
-            NotificationCenter.default.post(name: .nickelToggleShortcuts, object: nil)
-            return true
-        }
-        if modifiers == [.command], characters == "f" {
-            NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
-            return true
-        }
-        if modifiers == [.command], characters == "n" {
-            NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
-            return true
-        }
-        if modifiers == [.command], characters == "w" {
-            if isVisible { toggle() }
-            return true
-        }
-        if modifiers == [.command], characters == "," {
-            SettingsWindowController.shared.show()
-            return true
-        }
-        // ⌘⇧] / ⌘⇧[ cycle through Show All + each section in order. Matched
-        // loosely: with Shift held, `charactersIgnoringModifiers` (which
-        // honors Shift, unlike Command) can deliver either the bracket itself
-        // or its shifted form ("}"/"{"), and observed behavior has varied by
-        // keyboard layout, so the keyCode (30 = ']', 33 = '[' on ANSI) is
-        // checked as a robust fallback alongside the characters.
-        if modifiers == [.command, .shift],
-           characters == "]" || characters == "}" || event.keyCode == 30 {
-            cycleSection(direction: 1)
-            return true
-        }
-        if modifiers == [.command, .shift],
-           characters == "[" || characters == "{" || event.keyCode == 33 {
-            cycleSection(direction: -1)
-            return true
-        }
-        // ⇧⌘R renames the focused section, mirroring the header's
-        // double-click/context-menu rename. Swallowed even with no section
-        // focused (or an overlay already up) so it never falls through to
-        // type into a field.
-        if modifiers == [.command, .shift], characters == "r" {
-            if let section = panelActions?.store.activeSection, selectionModel.presentedOverlay == nil {
-                selectionModel.beginRenamingSection(section)
+        // Matching lives in the `WindowShortcuts` table (see that file for
+        // why); this switch is only the dispatch, performing each command's
+        // existing action.
+        if let command = WindowShortcuts.command(for: event) {
+            switch command {
+            case .sectionSwitcher:
+                selectionModel.toggleSectionSwitcher()
+            case .moveToSection:
+                selectionModel.toggleMoveToSection()
+            case .shortcutsCard:
+                selectionModel.toggleOverlay(.shortcuts)
+            case .findFocus:
+                NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
+            case .newNote:
+                NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+            case .closePanel:
+                if isVisible { toggle() }
+            case .settings:
+                SettingsWindowController.shared.show()
+            case .nextSection:
+                cycleSection(direction: 1)
+            case .previousSection:
+                cycleSection(direction: -1)
+            case .renameSection:
+                // Mirrors the header's double-click/context-menu rename.
+                // Swallowed even with no section focused (or an overlay
+                // already up) so it never falls through to type into a
+                // field.
+                if let section = panelActions?.store.activeSection, selectionModel.presentedOverlay == nil {
+                    selectionModel.beginRenamingSection(section)
+                }
             }
             return true
         }

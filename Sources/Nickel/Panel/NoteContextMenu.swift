@@ -78,35 +78,6 @@ enum NoteContextMenu {
         return menu
     }
 
-    /// The section header's menu, mirroring the SwiftUI one it replaces for
-    /// headers rendered as table group rows.
-    static func sectionHeaderMenu(
-        _ name: String,
-        store: NoteStore,
-        selection: SelectionModel,
-        actions: PanelActions
-    ) -> NSMenu {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-        menu.addItem(item("Rename Section", nil) { selection.beginRenamingSection(name) })
-        menu.addItem(.separator())
-        menu.addItem(item("Move Up", nil, enabled: store.sections.first != name) {
-            store.moveSection(name, offset: -1)
-        })
-        menu.addItem(item("Move Down", nil, enabled: store.sections.last != name) {
-            store.moveSection(name, offset: 1)
-        })
-        menu.addItem(.separator())
-        let hasDone = store.activeNotes.contains { $0.isDone && $0.listName == name }
-        menu.addItem(item("Clear Done in Section", nil, enabled: hasDone) {
-            store.clearDone(in: name)
-        })
-        menu.addItem(.separator())
-        menu.addItem(item("Dissolve Section", nil) { store.dissolveSection(name) })
-        menu.addItem(item("Delete Section…", nil) { actions.requestDeleteSection(name) })
-        return menu
-    }
-
     private static func item(
         _ title: String,
         _ command: PanelCommand?,

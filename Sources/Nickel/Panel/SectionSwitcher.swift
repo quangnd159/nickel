@@ -1,20 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// Posted by `FloatingPanel` when ⌘K is pressed, toggling the section
-/// palette's presentation in switch mode. Mirrors `.nickelFocusSearch` in
-/// `SearchField.swift`, except `PanelView` doesn't focus an existing field in
-/// response — it flips `SelectionModel.presentedOverlay`, which mounts a
-/// fresh `SectionSwitcher` that focuses its own field as it appears.
-extension Notification.Name {
-    static let nickelToggleSectionSwitcher = Notification.Name("NickelToggleSectionSwitcher")
-
-    /// Posted by `FloatingPanel` when ⌃⌘M ("Move to Section…") is pressed,
-    /// or by the View menu's equivalent item, toggling the same palette in
-    /// move mode. See `PanelView.toggleMoveToSection`.
-    static let nickelToggleMoveToSection = Notification.Name("NickelToggleMoveToSection")
-}
-
 /// The command palette, opened in one of two modes by two distinct entry
 /// points (⌘K vs. ⌃⌘M — see `move` below):
 ///
