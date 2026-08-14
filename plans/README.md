@@ -7,6 +7,11 @@ commit `62bbcb6` — pre-ship audit after the NSTableView list refactor, the
 drag-and-drop feature, the ⌘K/⌃⌘M split, and the done-on-copy setting.
 Execute in the order below unless dependencies say otherwise.
 
+Round 3 executed and merged in full on 2026-08-14 (Sonnet executors in
+isolated worktrees, each diff reviewed against its plan before merge):
+`swift test` 437/437 green on main, UI probe green. Owed manual checks are
+listed at the end of the round-3 section.
+
 ## Round 3 — execution order & status
 
 | Plan | Title | Priority | Effort | Depends on | Status |
@@ -23,10 +28,10 @@ Execute in the order below unless dependencies say otherwise.
 | 028 | Panel min size + stale-not-wipe widths | P1 | S | — | DONE (merged 2026-08-14) |
 | 034 | Inert measurement content | P2 | M | — | DONE (merged 2026-08-14) |
 | 037 | VoiceOver essentials + scroller pref | P1 | S | — | DONE (merged 2026-08-14) |
-| 036 | Pipeline short-circuit + resize coalescing | P2 | M | 028, 035 | TODO |
+| 036 | Pipeline short-circuit + resize coalescing | P2 | M | 028, 035 | DONE (merged 2026-08-14) |
 | 038 | Visual polish (scrim, ⌘/ scroll, focus ring, motion, casing) | P2 | M | 029 (soft) | DONE (merged 2026-08-14) |
-| 039 | Menu/shortcut single source + File menu | P2 | M | 027, 029, 032 | TODO |
-| 040 | Palette + context-menu tests | P2 | M | 039 (soft) | TODO |
+| 039 | Menu/shortcut single source + File menu | P2 | M | 027, 029, 032 | DONE (merged 2026-08-14) |
+| 040 | Palette + context-menu tests | P2 | M | 039 (soft) | DONE (merged 2026-08-14) |
 
 Round 3 file-conflict notes: 026/027/028/034/035/036 all touch
 `NoteListTable.swift`; 027/031/032/033/039 touch `FloatingPanel.swift` or
