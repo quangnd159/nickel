@@ -980,13 +980,15 @@ struct PanelView: View {
     }
 
     /// The composer's paperclip button: opens a standard file picker whose
-    /// chosen files become pending attachments. The panel is a
-    /// nonactivating panel, so `NSOpenPanel` needs the app explicitly
-    /// activated first or it can appear behind other windows; running it
-    /// modally (rather than as a sheet) keeps this a simple, synchronous
-    /// call like the rest of the panel's AppKit interop.
+    /// chosen files become pending attachments. The panel window itself can
+    /// be showing without the app being active (e.g. summoned by the global
+    /// hotkey while another app is frontmost), so `NSOpenPanel` needs the
+    /// app explicitly activated first or it can appear behind other
+    /// windows; running it modally (rather than as a sheet) keeps this a
+    /// simple, synchronous call like the rest of the panel's AppKit
+    /// interop.
     private func presentAttachmentPicker() {
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate()
 
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true

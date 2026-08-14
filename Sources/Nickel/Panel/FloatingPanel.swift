@@ -371,8 +371,8 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         }
     }
 
-    /// With the Dock icon on, a panel click can `NSApp.activate` Nickel (see
-    /// `sendEvent`). If the panel is then dismissed while Nickel is still
+    /// A panel click can activate Nickel (native click-to-activate — see the
+    /// init comment). If the panel is then dismissed while Nickel is still
     /// active and no other Nickel window (Settings, About) is up, activation
     /// would otherwise strand Nickel as the active app with no windows and a
     /// stale menu bar — `NSApp.hide(nil)` is the standard trick to hand
@@ -486,21 +486,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         return super.performKeyEquivalent(with: event)
     }
 
-    /// Activates Nickel for a hotkey summon. Under macOS 14 cooperative
-    /// activation a bare `NSApp.activate()` is routinely declined when
-    /// another app is frontmost (a global event tap isn't user intent the
-    /// system recognizes), which left the summoned panel visible but not
-    /// key. `activate(from:options:)` is the documented handoff for exactly
-    /// this: the target names the frontmost app as the one yielding to it.
-    /// The bare `activate()` remains as a fallback if that's declined.
+    /// Activates Nickel for a hotkey summon. See `AppActivation` for why a
+    /// bare `NSApp.activate()` alone isn't enough.
     private func activateForSummon() {
-        guard !NSApp.isActive else { return }
-        if let front = NSWorkspace.shared.frontmostApplication,
-           front != .current,
-           NSRunningApplication.current.activate(from: front, options: []) {
-            return
-        }
-        NSApp.activate()
+        AppActivation.activate()
     }
 
     /// Steps the active section forward (`direction: 1`) or backward
@@ -551,16 +540,8 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// the card). This also covers the section switcher's own field, whose
     /// `cancelOperation` intercept becomes a never-reached fallback.
     ///
-    /// Also activates Nickel on a deliberate mouse click into the panel,
-    /// when the Dock icon setting is on. The panel stays a
-    /// `.nonactivatingPanel` so double-shift show and typing never steal
-    /// activation from the frontmost app (that's the whole point of the
-    /// capture flow), but a click should behave like clicking any other
-    /// app's window — otherwise Nickel would have a menu bar and Dock icon
-    /// that never actually go frontmost. Checked here rather than in
-    /// `mouseDown`, since clicks landing on subviews (buttons, fields) are
-    /// dispatched straight to those views and never reach the window's own
-    /// `mouseDown`.
+    /// (Click-to-activate itself needs no code here: the panel is a normal
+    /// activating panel — see the init comment — so AppKit handles it.)
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.keyCode == 53, selectionModel.presentedOverlay != nil {
             // Same animation the overlay opened with (`PanelView.toggleOverlay`),

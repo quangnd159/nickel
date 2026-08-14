@@ -498,9 +498,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         }
     }
 
-    /// Dock icon click (only reachable with "Show Dock Icon" on): the
-    /// standard reopen behavior is to bring up the app's window, which for
-    /// Nickel means showing the panel if it's hidden.
+    /// Dock icon click: the standard reopen behavior is to bring up the
+    /// app's window, which for Nickel means showing the panel if it's
+    /// hidden.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if let panel, !panel.isVisible {
             panel.toggle()
