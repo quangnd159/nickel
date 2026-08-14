@@ -8,6 +8,7 @@ struct SettingsView: View {
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var keepOnTop = PanelSettings.keepPanelOnTop
     @State private var showMenuBarIcon = PanelSettings.showMenuBarIcon
+    @State private var markDoneOnCopy = PanelSettings.markDoneOnCopy
     @State private var captureKey = PanelSettings.captureKey
     @State private var panelToggleKey = PanelSettings.panelToggleKey
 
@@ -31,6 +32,11 @@ struct SettingsView: View {
                 Toggle("Show Menu Bar Icon", isOn: $showMenuBarIcon)
                     .onChange(of: showMenuBarIcon) { _, newValue in
                         PanelSettings.showMenuBarIcon = newValue
+                    }
+
+                Toggle("Mark notes as done when copied", isOn: $markDoneOnCopy)
+                    .onChange(of: markDoneOnCopy) { _, newValue in
+                        PanelSettings.markDoneOnCopy = newValue
                     }
             } footer: {
                 Text("With the menu bar icon hidden, Nickel stays available via its hotkeys and the Dock.")

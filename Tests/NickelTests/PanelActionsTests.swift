@@ -9,6 +9,8 @@ final class PanelActionsTests: XCTestCase {
     private var selection: SelectionModel!
     private var actions: PanelActions!
 
+    private let markDoneOnCopyDefaultsKey = "markDoneOnCopy"
+
     override func setUp() {
         super.setUp()
         tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -17,10 +19,12 @@ final class PanelActionsTests: XCTestCase {
         store = NoteStore(fileURL: fileURL)
         selection = SelectionModel(store: store)
         actions = PanelActions(store: store, selection: selection)
+        UserDefaults.standard.removeObject(forKey: markDoneOnCopyDefaultsKey)
     }
 
     override func tearDown() {
         try? FileManager.default.removeItem(at: tempDirectory)
+        UserDefaults.standard.removeObject(forKey: markDoneOnCopyDefaultsKey)
         actions = nil
         selection = nil
         store = nil
@@ -500,5 +504,79 @@ final class PanelActionsTests: XCTestCase {
         // Must not trap.
         _ = duplicateActions.allSelectedAreDone
         duplicateActions.toggleDone()
+    }
+
+    // MARK: - Mark done on copy
+
+    func testCopyWithSettingOffLeavesDoneStateUnchanged() {
+        PanelSettings.markDoneOnCopy = false
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        selection.selectSingle(id)
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copy(pasteboard: pasteboard)
+
+        XCTAssertFalse(store.notes[0].isDone)
+    }
+
+    func testCopyWithSettingOnMarksTheCopiedSelectionDone() {
+        PanelSettings.markDoneOnCopy = true
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        let ids = store.notes.map(\.id)
+        selection.selectSingle(ids[0])
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copy(pasteboard: pasteboard)
+
+        XCTAssertTrue(store.notes.first { $0.id == ids[0] }!.isDone)
+        XCTAssertFalse(store.notes.first { $0.id == ids[1] }!.isDone, "only the copied note is marked")
+    }
+
+    func testCopyAsListWithSettingOnMarksAlreadyDoneNotesStayDoneWithoutToggling() {
+        PanelSettings.markDoneOnCopy = true
+        store.add(text: "a", sourceApp: nil)
+        let id = store.notes[0].id
+        store.toggleDone(ids: [id])
+        selection.selectSingle(id)
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copyAsList(pasteboard: pasteboard)
+
+        XCTAssertTrue(store.notes[0].isDone, "an already-done note must stay done, not toggle back off")
+    }
+
+    func testCopyInTheLogbookWithSettingOnNeverMarksArchivedNotesDone() {
+        PanelSettings.markDoneOnCopy = true
+        store.add(text: "archived note", sourceApp: nil)
+        let id = archiveSingleNoteAndShowLogbook()
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copy(pasteboard: pasteboard)
+
+        // The note was already marked done (and cleared) to get into the
+        // Logbook; the point of this test is that copying there doesn't
+        // stamp a fresh `completedAt` or otherwise re-touch it.
+        let completedAt = store.notes.first { $0.id == id }?.completedAt
+        actions.copy(pasteboard: pasteboard)
+        XCTAssertEqual(store.notes.first { $0.id == id }?.completedAt, completedAt, "copying in the Logbook must never re-mark an archived note")
+    }
+
+    func testCopyAllAsListWithSettingOnMarksEveryVisibleLiveNoteDone() {
+        PanelSettings.markDoneOnCopy = true
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        store.add(text: "c", sourceApp: nil)
+
+        let pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        defer { pasteboard.releaseGlobally() }
+        actions.copyAllAsList(pasteboard: pasteboard)
+
+        XCTAssertTrue(store.notes.allSatisfy(\.isDone))
     }
 }

@@ -55,18 +55,31 @@ final class PanelActions: ObservableObject {
         let notes = selectedNotes
         guard let layout = PasteboardWriter.copy(notes: notes, store: store, pasteboard: pasteboard) else { return }
         SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout, pasteboard: pasteboard)
+        markDoneIfEnabled(notes)
     }
 
     func copyAsList(pasteboard: NSPasteboard = .general) {
         let notes = selectedNotes
         guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store, pasteboard: pasteboard) else { return }
         SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout, pasteboard: pasteboard)
+        markDoneIfEnabled(notes)
     }
 
     func copyAllAsList(pasteboard: NSPasteboard = .general) {
         let notes = allVisibleNotes
         guard let layout = PasteboardWriter.copyAsList(notes: notes, store: store, pasteboard: pasteboard) else { return }
         SequentialPasteCoordinator.shared.handleCopy(notes: notes, layout: layout, pasteboard: pasteboard)
+        markDoneIfEnabled(notes)
+    }
+
+    /// "Mark notes as done when copied" (`PanelSettings.markDoneOnCopy`).
+    /// Live notes only: the Logbook is a read-only record (see
+    /// `isShowingLogbook` above), so a copy made there must never mark an
+    /// archived note done. Already-done notes are left alone by
+    /// `store.markDone`, so re-copying a done note can't un-done it.
+    private func markDoneIfEnabled(_ notes: [Note]) {
+        guard PanelSettings.markDoneOnCopy, !isShowingLogbook else { return }
+        store.markDone(ids: Set(notes.map(\.id)))
     }
 
     // MARK: - Done / edit / merge / delete
