@@ -229,13 +229,68 @@ final class NoteStore: ObservableObject {
     /// data ever drifting apart.
     func move(ids: Set<UUID>, toSection sectionName: String?) {
         guard !ids.isEmpty else { return }
-        if let sectionName, !sections.contains(sectionName) {
-            sections.append(sectionName)
-        }
+        ensureSectionExists(sectionName)
         for index in notes.indices where ids.contains(notes[index].id) {
             notes[index].listName = sectionName
         }
         scheduleSave()
+    }
+
+    /// The drag-and-drop move: puts `ids` into `sectionName` *and* at a
+    /// position, landing them immediately before `beforeID` — or at the end of
+    /// that section's notes when `beforeID` is `nil`.
+    ///
+    /// `ids` is ordered (the dragged rows in the order they appear on screen)
+    /// and that relative order is preserved at the destination, which is why
+    /// this takes an array where `move(ids:toSection:)` takes a set: that one
+    /// only ever changes which section notes belong to, never where they sit.
+    ///
+    /// Display order is `notes` order — `activeNotes` is a filter and the
+    /// sections are derived by `listName` — so repositioning here is what the
+    /// list shows. Archived notes share the array but are ordered by
+    /// `archivedAt` when the Logbook reads them, so moving live notes past
+    /// them can't disturb the Logbook.
+    func move(ids: [UUID], toSection sectionName: String?, before beforeID: UUID?) {
+        guard !ids.isEmpty else { return }
+        ensureSectionExists(sectionName)
+
+        let moving = Set(ids)
+        let lifted: [Note] = ids.compactMap { id in
+            guard var note = notes.first(where: { $0.id == id }) else { return nil }
+            note.listName = sectionName
+            return note
+        }
+        guard !lifted.isEmpty else { return }
+
+        // Resolved against the array as it stands, *then* corrected for the
+        // notes about to be lifted out ahead of it. Resolving after the lift
+        // instead would turn a drop onto the dragged notes themselves — whose
+        // `beforeID` is one of them, and so no longer findable — into a move to
+        // the end of the section, when it should do nothing at all.
+        let target: Int
+        if let beforeID, let index = notes.firstIndex(where: { $0.id == beforeID }) {
+            target = index
+        } else if let last = notes.lastIndex(where: { $0.archivedAt == nil && $0.listName == sectionName }) {
+            target = last + 1
+        } else {
+            target = notes.endIndex
+        }
+        let liftedBeforeTarget = notes[..<target].reduce(into: 0) { count, note in
+            if moving.contains(note.id) { count += 1 }
+        }
+
+        var reordered = notes.filter { !moving.contains($0.id) }
+        reordered.insert(contentsOf: lifted, at: target - liftedBeforeTarget)
+        notes = reordered
+        scheduleSave()
+    }
+
+    /// Defensive: a section that isn't known yet is appended. This shouldn't
+    /// happen in practice — every entry point picks from the existing list —
+    /// but it guards against the section list and the note data drifting apart.
+    private func ensureSectionExists(_ sectionName: String?) {
+        guard let sectionName, !sections.contains(sectionName) else { return }
+        sections.append(sectionName)
     }
 
     /// Renames every note in section `oldName` to `newName`, and updates the

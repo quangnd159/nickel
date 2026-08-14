@@ -230,7 +230,85 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             fail("no section header row after creating a section")
         }
 
+        checkDragMove(table: table, store: store, selection: selection)
+
         finish()
+    }
+
+    /// What a completed drop does to the list, short of the gesture itself:
+    /// `acceptDrop` calls exactly this store mutation and sets exactly this
+    /// selection, so everything downstream of the pointer is covered here.
+    /// Dragging with a real mouse stays a manual check.
+    private func checkDragMove(table: NoteListTableView, store: NoteStore, selection: SelectionModel) {
+        selection.endEditing()
+        store.setActiveSection(nil)
+        settle()
+
+        guard let moved = store.activeNotes.first(where: { $0.text.count > 200 }) else {
+            fail("no long note to drag")
+            return
+        }
+
+        // Expanded, so the row has a distinctive height that a naive rebuild
+        // would lose.
+        if !selection.expandedIDs.contains(moved.id) {
+            selection.toggleExpanded(ids: [moved.id])
+        }
+        settle()
+        guard let beforeRow = table.coordinator?.rows.firstIndex(of: .note(moved.id)) else {
+            fail("the note to drag has no row")
+            return
+        }
+        let heightBefore = table.rect(ofRow: beforeRow).height
+        print("— before the drop —")
+        print("  row \(beforeRow) height=\(heightBefore)")
+
+        // Exactly what `acceptDrop` does for a drop onto the "Probe Section"
+        // header: move into that section, at its end, and keep the dragged
+        // notes selected.
+        store.move(ids: [moved.id], toSection: "Probe Section", before: nil)
+        selection.selectedIDs = [moved.id]
+        settle()
+
+        guard let rows = table.coordinator?.rows,
+              let afterRow = rows.firstIndex(of: .note(moved.id)) else {
+            fail("the dragged note vanished from the list")
+            return
+        }
+        let heightAfter = table.rect(ofRow: afterRow).height
+        print("— after the drop —")
+        print("  row \(afterRow) height=\(heightAfter)")
+
+        check(
+            heightAfter == heightBefore,
+            "a dropped row keeps the height it was measured at "
+                + "(\(heightBefore) before, \(heightAfter) after)"
+        )
+        check(
+            rows.firstIndex(of: .sectionHeader("Probe Section")).map { $0 < afterRow } == true,
+            "the dropped note should land under its new section's header"
+        )
+        check(
+            selection.selectedIDs == [moved.id],
+            "the dragged notes stay selected after the drop"
+        )
+        check(
+            store.notes.first(where: { $0.id == moved.id })?.listName == "Probe Section",
+            "the dropped note should belong to the section it was dropped into"
+        )
+
+        // And the row is still a live, correctly sized cell at its new home.
+        table.scrollRowToVisible(afterRow)
+        settle()
+        guard let cell = table.view(atColumn: 0, row: afterRow, makeIfNecessary: false) as? NoteListCellView else {
+            fail("the dropped note's row has no cell")
+            return
+        }
+        check(
+            abs((heightAfter - table.intercellSpacing.height) - cell.contentIdealHeight) < 0.5,
+            "the dropped row's height still matches its cell's layout "
+                + "(\(heightAfter - table.intercellSpacing.height) vs \(cell.contentIdealHeight))"
+        )
     }
 
     // MARK: - Reveal

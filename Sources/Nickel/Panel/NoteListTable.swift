@@ -175,6 +175,19 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         table.doubleAction = #selector(NoteListTableView.handleDoubleClick)
         table.target = table
 
+        // Drag to reorder, and to move notes between sections. The Logbook is
+        // neither a drag source nor a drop target — it's a settled record —
+        // so it registers nothing and refuses to write a pasteboard item.
+        if mode == .notes {
+            table.registerForDraggedTypes([.nickelNoteID])
+            // Inside the app a drag is always a move: reordering that left a
+            // copy behind would be nonsense. Dragging a note out to another
+            // app copies its text instead.
+            table.setDraggingSourceOperationMask(.move, forLocal: true)
+            table.setDraggingSourceOperationMask(.copy, forLocal: false)
+            table.draggingDestinationFeedbackStyle = .regular
+        }
+
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
@@ -667,6 +680,103 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         return NoteContextMenu.menu(mode: mode, store: store, selection: selection, actions: actions)
     }
 
+    // MARK: Drag and drop
+
+    /// The notes in the current drag, in the order they appear on screen —
+    /// which is the order they're re-inserted in at the destination.
+    private var draggedNoteIDs: [UUID] = []
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard mode == .notes, rows.indices.contains(row), let id = rows[row].noteID else { return nil }
+        guard let note = store.notes.first(where: { $0.id == id }) else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(id.uuidString, forType: .nickelNoteID)
+        // Free of charge, and the obvious thing to expect: dragging a note
+        // into any other app drops its text.
+        item.setString(note.text, forType: .string)
+        return item
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        draggingSession session: NSDraggingSession,
+        willBeginAt screenPoint: NSPoint,
+        forRowIndexes rowIndexes: IndexSet
+    ) {
+        // Ascending row order is visible order.
+        draggedNoteIDs = rowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].noteID : nil }
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        draggingSession session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        draggedNoteIDs = []
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        validateDrop info: NSDraggingInfo,
+        proposedRow row: Int,
+        proposedDropOperation dropOperation: NSTableView.DropOperation
+    ) -> NSDragOperation {
+        guard case .accept(let targetRow, let targetOperation, _) = resolveDrop(row: row, operation: dropOperation, info: info) else {
+            return []
+        }
+        tableView.setDropRow(targetRow, dropOperation: targetOperation)
+        return .move
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        acceptDrop info: NSDraggingInfo,
+        row: Int,
+        dropOperation: NSTableView.DropOperation
+    ) -> Bool {
+        guard case .accept(_, _, let target) = resolveDrop(row: row, operation: dropOperation, info: info) else {
+            return false
+        }
+        let ids = draggedNoteIDs
+        guard !ids.isEmpty else { return false }
+
+        // The store is told, and the list follows from it through the same
+        // diff every other change goes through — no `moveRow` calls here.
+        // Driving the rows directly would make the table a second source of
+        // truth for their order, and the two would eventually disagree.
+        store.move(ids: ids, toSection: target.section, before: target.beforeID)
+
+        // The dragged notes stay selected. This looks like the opposite of the
+        // ⌃⌘M palette, which clears the selection after moving — but there the
+        // notes leave the view (the palette switches to another section), so
+        // keeping them selected would strand a selection off screen. Here they
+        // are still right there, under the pointer that just put them down.
+        selection.selectedIDs = Set(ids)
+        return true
+    }
+
+    private func resolveDrop(
+        row: Int,
+        operation: NSTableView.DropOperation,
+        info: NSDraggingInfo
+    ) -> NoteListDrop.Resolution {
+        // Drags from anywhere but this list are not this phase's business; the
+        // composer keeps its own drop area for those.
+        guard let source = info.draggingSource as? NSTableView, source === tableView else {
+            return .reject
+        }
+        return NoteListDrop.resolve(
+            rows: rows,
+            proposedRow: row,
+            operation: operation,
+            mode: mode,
+            activeSection: store.activeSection,
+            isFiltering: !selection.searchText.isEmpty,
+            draggedIDs: Set(draggedNoteIDs)
+        )
+    }
+
     // MARK: NSTableViewDataSource / Delegate
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -848,6 +958,29 @@ final class NoteListRowView: NSTableRowView {
     /// on the card's white fill. This row never draws that highlight, so its
     /// content must always draw as normal.
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    /// The "drop into this section" highlight, drawn when a drag hovers a
+    /// section header.
+    ///
+    /// Written out rather than left to AppKit for shape, not visibility:
+    /// `drawDraggingDestinationFeedback(in:)` is documented as independent of
+    /// `drawSelection`/`drawBackground`, so suppressing those doesn't suppress
+    /// this. But the default draws a plain full-width rect, which sits oddly
+    /// against a list of inset, 16pt-rounded cards. This matches them.
+    override func drawDraggingDestinationFeedback(in dirtyRect: NSRect) {
+        guard isTargetForDropOperation else { return }
+        let rect = bounds.insetBy(dx: 2, dy: 1)
+        let path = NSBezierPath(
+            roundedRect: rect,
+            xRadius: NoteRowMetrics.cornerRadius,
+            yRadius: NoteRowMetrics.cornerRadius
+        )
+        NSColor.controlAccentColor.withAlphaComponent(0.15).setFill()
+        path.fill()
+        NSColor.controlAccentColor.setStroke()
+        path.lineWidth = 2
+        path.stroke()
+    }
 }
 
 /// Catches clicks that land in the scroll view but below the last row — the

@@ -34,6 +34,13 @@ A native macOS note capture app, a clipboard that remembers: double-Shift grabs 
   - Row heights come from `tableView(_:heightOfRow:)` over a cache, **not** `usesAutomaticRowHeights` — that was tried and leaves every row at the height it first measured. And each cell pins its content's width in SwiftUI (`.frame(width:)`) before hosting it: `NSHostingView` reports the content's *ideal* size, and a `Text`'s ideal size is its unwrapped single line, so an unpinned multi-line note measures one line tall. Both are verified by `NICKEL_UI_PROBE=1` (see Commands); re-run it after touching row sizing.
   - Nothing measures or re-hosts content inside a layout pass. `heightOfRow` is a pure cache lookup and every measurement happens on a deferred turn; measuring inline re-enters Auto Layout and crashes.
   - A row growing and the list scrolling to reveal it are **one** animation. Both happen inside the height flush's single `NSAnimationContext` group, so don't add a scroll anywhere that reacts to the growth afterwards (the inline editor used to, and it read as two separate motions).
+- Drag to reorder (`Sources/Nickel/Panel/NoteListDrop.swift` + the drag section of `NoteListTable.swift`) has its own rules:
+  - `validateDrop` and `acceptDrop` both go through `NoteListDrop.resolve`, so what the drop indicator promises and what the store is told can't disagree. Don't let one of them grow its own logic.
+  - `acceptDrop` mutates the store and lets the normal diff move the rows. No `moveRow(at:to:)` — that would make the table a second source of truth for note order.
+  - No positional drops while a search filter is active: the note above a gap on screen isn't the note above it in the list. Drops **onto a section header** stay allowed, since "into this section, at its end" is unambiguous either way. Reminders disables filtered reordering for the same reason.
+  - Dropping onto a section header is the only way to reach a section with no notes. Don't remove it as redundant.
+  - The Logbook is neither drag source nor drop target, and drags from other apps into the list are not accepted — the composer's own drop area (`ComposerDropView.swift`) handles those, and it is deliberately AppKit-level.
+  - Local drags are `.move`, external drags `.copy`; rows also carry `.string`, so dragging a note into another app pastes its text.
 - Nickel is a standard Dock-icon app, not `LSUIElement`.
 - Storage is local-only by design: a local JSON file, no accounts, no sync, no cloud.
 
