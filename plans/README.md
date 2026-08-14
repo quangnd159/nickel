@@ -19,12 +19,12 @@ Execute in the order below unless dependencies say otherwise.
 | 033 | Accessibility revocation recovery | P1 | S | — | DONE (merged 2026-08-14) |
 | 035 | Cheap list perf (re-host key, id index) | P1 | S | — | DONE (merged 2026-08-14) |
 | 032 | Modern activation + stale comments | P1 | S | — | DONE (merged 2026-08-14) |
-| 027 | Edit-menu note actions | P1 | S | — | TODO |
-| 028 | Panel min size + stale-not-wipe widths | P1 | S | — | TODO |
-| 034 | Inert measurement content | P2 | M | — | TODO |
-| 037 | VoiceOver essentials + scroller pref | P1 | S | — | TODO |
+| 027 | Edit-menu note actions | P1 | S | — | DONE (merged 2026-08-14) |
+| 028 | Panel min size + stale-not-wipe widths | P1 | S | — | DONE (merged 2026-08-14) |
+| 034 | Inert measurement content | P2 | M | — | DONE (merged 2026-08-14) |
+| 037 | VoiceOver essentials + scroller pref | P1 | S | — | DONE (merged 2026-08-14) |
 | 036 | Pipeline short-circuit + resize coalescing | P2 | M | 028, 035 | TODO |
-| 038 | Visual polish (scrim, ⌘/ scroll, focus ring, motion, casing) | P2 | M | 029 (soft) | TODO |
+| 038 | Visual polish (scrim, ⌘/ scroll, focus ring, motion, casing) | P2 | M | 029 (soft) | DONE (merged 2026-08-14) |
 | 039 | Menu/shortcut single source + File menu | P2 | M | 027, 029, 032 | TODO |
 | 040 | Palette + context-menu tests | P2 | M | 039 (soft) | TODO |
 
