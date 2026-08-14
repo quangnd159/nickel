@@ -216,6 +216,7 @@ final class PanelActions: ObservableObject {
     func move(toSection sectionName: String?) {
         guard !isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
         store.move(ids: selection.selectedIDs, toSection: sectionName)
+        selection.clear()
     }
 
     /// Creates a new section immediately with a provisional name (Finder's

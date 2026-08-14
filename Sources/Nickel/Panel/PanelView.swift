@@ -195,6 +195,9 @@ struct PanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .nickelToggleSectionSwitcher)) { _ in
             toggleSectionSwitcher()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .nickelToggleMoveToSection)) { _ in
+            toggleMoveToSection()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .nickelToggleShortcuts)) { _ in
             toggleOverlay(.shortcuts)
         }
@@ -262,24 +265,34 @@ struct PanelView: View {
     }
 
     /// ⌘K's toggle: closes the palette if it's already open (in either
-    /// mode), otherwise opens it fresh with `move` snapshotted from whether
-    /// anything is selected *right now* — see the `move` doc comment on
-    /// `PanelOverlay.sectionSwitcher`. Kept separate from `toggleOverlay`
-    /// (rather than passed a computed `PanelOverlay` there) because that
-    /// generic helper's equality-based toggle would treat re-pressing ⌘K
-    /// with a since-changed selection as "opening a different overlay"
-    /// instead of closing the one that's open.
+    /// mode), otherwise opens it fresh in switch mode. Kept separate from
+    /// `toggleOverlay` (rather than passed a computed `PanelOverlay` there)
+    /// because that generic helper's equality-based toggle would treat
+    /// re-pressing ⌘K while the palette is open in move mode as "opening a
+    /// different overlay" instead of closing the one that's open.
     private func toggleSectionSwitcher() {
         withAnimation(.panelOverlay) {
             if case .sectionSwitcher = selection.presentedOverlay {
                 selection.presentedOverlay = nil
             } else {
-                // Logbook rows can't be moved into a section (see
-                // `PanelActions.move`), so a selection there mustn't open the
-                // palette in move mode — ⌘K stays the switch-and-command
-                // palette, and picking a destination leaves the Logbook.
-                let move = !selection.isShowingLogbook && !selection.selectedIDs.isEmpty
-                selection.presentedOverlay = .sectionSwitcher(move: move)
+                selection.presentedOverlay = .sectionSwitcher(move: false)
+            }
+        }
+    }
+
+    /// ⌃⌘M's ("Move to Section…") toggle: a no-op with nothing selected or
+    /// while showing the Logbook (Logbook rows can't be moved into a
+    /// section — see `PanelActions.move`). Otherwise closes the palette if
+    /// it's already open in move mode, or opens/re-opens it in move mode —
+    /// mirroring `toggleSectionSwitcher`'s shape, but scoped to move mode
+    /// only so it never closes a switch-mode palette that ⌘K opened.
+    private func toggleMoveToSection() {
+        guard !selection.isShowingLogbook, !selection.selectedIDs.isEmpty else { return }
+        withAnimation(.panelOverlay) {
+            if case .sectionSwitcher(let move) = selection.presentedOverlay, move {
+                selection.presentedOverlay = nil
+            } else {
+                selection.presentedOverlay = .sectionSwitcher(move: true)
             }
         }
     }

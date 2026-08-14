@@ -40,7 +40,8 @@ struct ShortcutsOverlay: View {
             ])
 
             group("Navigate", [
-                ShortcutRow("Commands, or move to section", ["⌘", "K"]),
+                ShortcutRow("Commands, or switch section", ["⌘", "K"]),
+                ShortcutRow("Move to Section", ["⌃", "⌘", "M"]),
                 ShortcutRow("Next section", ["⇧", "⌘", "]"]),
                 ShortcutRow("Previous section", ["⇧", "⌘", "["]),
                 ShortcutRow("Rename section", ["⇧", "⌘", "R"]),

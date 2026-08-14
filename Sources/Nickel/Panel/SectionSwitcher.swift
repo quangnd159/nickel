@@ -2,31 +2,31 @@ import SwiftUI
 import AppKit
 
 /// Posted by `FloatingPanel` when ⌘K is pressed, toggling the section
-/// palette's presentation. Mirrors `.nickelFocusSearch` in
+/// palette's presentation in switch mode. Mirrors `.nickelFocusSearch` in
 /// `SearchField.swift`, except `PanelView` doesn't focus an existing field in
 /// response — it flips `SelectionModel.presentedOverlay`, which mounts a
 /// fresh `SectionSwitcher` that focuses its own field as it appears.
-///
-/// The palette itself is selection-aware: with nothing selected, ⌘K opens it
-/// in "switch" mode (search-and-switch the active section); with one or more
-/// notes selected, it opens in "move" mode (search-and-move the selection
-/// into a section) instead. Which mode is decided once, by `PanelView`, when
-/// this notification is handled — see the `move` doc comment on
-/// `PanelOverlay.sectionSwitcher`.
 extension Notification.Name {
     static let nickelToggleSectionSwitcher = Notification.Name("NickelToggleSectionSwitcher")
+
+    /// Posted by `FloatingPanel` when ⌃⌘M ("Move to Section…") is pressed,
+    /// or by the View menu's equivalent item, toggling the same palette in
+    /// move mode. See `PanelView.toggleMoveToSection`.
+    static let nickelToggleMoveToSection = Notification.Name("NickelToggleMoveToSection")
 }
 
-/// The ⌘K command palette, in one of two modes (see `move` above):
+/// The command palette, opened in one of two modes by two distinct entry
+/// points (⌘K vs. ⌃⌘M — see `move` below):
 ///
-/// - **Switch** (`move == false`): search-and-switch across "Show All",
+/// - **Switch** (`move == false`, ⌘K): search-and-switch across "Show All",
 ///   every section, and (for a query that doesn't already match one)
 ///   creating a new section — followed, under a hairline, by the commands
-///   that apply right now (`PaletteCommand`).
-/// - **Move** (`move == true`): search-and-move the current selection into a
-///   section — every matching section, plus "No Section" (ungroup), plus the
-///   same "New Section" row — without touching `store.activeSection` or the
-///   selection itself.
+///   that apply right now (`PaletteCommand`). Doesn't touch the selection.
+/// - **Move** (`move == true`, ⌃⌘M "Move to Section…"): search-and-move the
+///   current selection into a section — every matching section, plus "No
+///   Section" (ungroup), plus the same "New Section" row — without touching
+///   `store.activeSection`. The selection itself is cleared on a successful
+///   move (`PanelActions.move(toSection:)`).
 ///
 /// Presented as a dimmed overlay anchored near the top of the panel,
 /// matching native command palettes.
@@ -35,12 +35,18 @@ struct SectionSwitcher: View {
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
 
-    /// Snapshotted by `PanelView` at presentation time; see the `move` doc
-    /// comment on `PanelOverlay.sectionSwitcher`.
+    /// Which mode the palette opened in — fixed by the entry point that
+    /// opened it (⌘K vs. ⌃⌘M), not derived from the selection. See the type
+    /// doc comment above.
     let move: Bool
 
     @State private var query = ""
     @State private var highlightedIndex = 0
+
+    /// The selection count the move-mode header displays, captured once on
+    /// appear so the title stays stable for the palette's whole lifetime —
+    /// see `moveHeaderTitle`.
+    @State private var frozenMoveCount: Int?
     @Environment(\.controlActiveState) private var controlActiveState
 
     /// Whether the highlighted row draws with the emphasized (accent-filled,
@@ -71,6 +77,19 @@ struct SectionSwitcher: View {
 
     private var card: some View {
         VStack(spacing: 0) {
+            // Move mode acts on a selection the user may not see (it can
+            // scroll off-screen, or belong to a since-left section) — unlike
+            // switch mode, which only ever changes what's on screen, so it
+            // needs no such header.
+            if move {
+                Text(moveHeaderTitle)
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+                    .padding(.bottom, 2)
+                    .onAppear { frozenMoveCount = selection.selectedIDs.count }
+            }
+
             SectionSwitcherField(
                 text: $query,
                 placeholder: move ? "Move to…" : "Switch to…",
@@ -81,7 +100,8 @@ struct SectionSwitcher: View {
             )
             .font(.system(size: 13))
             .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.top, move ? 4 : 10)
+            .padding(.bottom, 10)
 
             Rectangle()
                 .fill(.quaternary)
@@ -266,6 +286,16 @@ struct SectionSwitcher: View {
         store.activeNotes.contains { $0.isDone && $0.listName == name }
     }
 
+    /// "Move 1 Note to Section" / "Move N Notes to Section", shown above the
+    /// search field only in move mode (see `card`). Reads the frozen count:
+    /// committing clears the selection before the palette finishes its
+    /// dismiss animation, and a live read would flash "Move 0 Notes" as it
+    /// fades out.
+    private var moveHeaderTitle: String {
+        let count = frozenMoveCount ?? selection.selectedIDs.count
+        return count == 1 ? "Move 1 Note to Section" : "Move \(count) Notes to Section"
+    }
+
     private func label(for result: Result) -> String {
         switch result {
         case .showAll: return "Show All"
@@ -317,13 +347,13 @@ struct SectionSwitcher: View {
 
     private func commit(_ result: Result) {
         if move {
-            // Move mode never touches `store.activeSection` or the
-            // selection: `actions.move(toSection:)` only reassigns
-            // `listName` on the already-selected notes. That includes the
-            // "New Section" row — unlike switch mode's `createSection`,
-            // which also activates the new section, `NoteStore.move` already
-            // appends an unrecognized name to `sections` on its own, so
-            // there's nothing else to do here.
+            // Move mode never touches `store.activeSection`:
+            // `actions.move(toSection:)` only reassigns `listName` on the
+            // already-selected notes (and then clears the selection). That
+            // includes the "New Section" row — unlike switch mode's
+            // `createSection`, which also activates the new section,
+            // `NoteStore.move` already appends an unrecognized name to
+            // `sections` on its own, so there's nothing else to do here.
             switch result {
             case .section(let name):
                 actions.move(toSection: name)

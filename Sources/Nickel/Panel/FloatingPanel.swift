@@ -15,6 +15,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// the composer's focus flag follows first responder and key state.
     var selectionModelForTesting: SelectionModel { selectionModel }
 
+    /// Read by `AppDelegate.validateMenuItem` to enable/disable the View
+    /// menu's "Move to Section…" item based on the current selection.
+    var currentSelectionModel: SelectionModel { selectionModel }
+
     /// Bumped on every `toggle()` call; an in-flight show/hide animation
     /// checks this in its completion handler and no-ops if it's stale, so a
     /// rapid double-shift can never have an old hide land after a newer show
@@ -365,8 +369,9 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         toggle()
     }
 
-    /// Handles ⌘K (section switcher), ⌘/ (keyboard shortcuts), ⌘F (focus
-    /// search), ⌘N (focus composer), and the attachment-paste ⌘V case by
+    /// Handles ⌘K (section switcher), ⌃⌘M (move selection to section), ⌘/
+    /// (keyboard shortcuts), ⌘F (focus search), ⌘N (focus composer), and the
+    /// attachment-paste ⌘V case by
     /// overriding `performKeyEquivalent` rather than folding them into
     /// `keyDown`'s `handle(_:actions:)`: command key-equivalents are routed
     /// to the focused view first (the search field, composer, or an inline
@@ -381,6 +386,10 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
         if modifiers == [.command], characters == "k" {
             NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
+            return true
+        }
+        if modifiers == [.command, .control], characters == "m" {
+            NotificationCenter.default.post(name: .nickelToggleMoveToSection, object: nil)
             return true
         }
         if modifiers == [.command], characters == "/" {
