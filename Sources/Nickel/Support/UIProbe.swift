@@ -473,6 +473,39 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         selection.toggleExpanded(ids: batch)
         settle()
 
+        // The core of the open animation's feel: the row grows and reveals
+        // the text — the text itself must be stationary the whole time. The
+        // cell is a clipping window over content that is never re-laid-out
+        // mid-animation (no bottom constraint on the host), so the editor's
+        // position in table coordinates must not drift by a point across the
+        // animation's run. (Table coordinates are content-relative, so the
+        // reveal scroll doesn't pollute the samples.)
+        selection.selectSingle(bottomNote.id)
+        selection.beginEditing(id: bottomNote.id, text: bottomNote.text)
+        var textYs: [CGFloat] = []
+        let deadline = Date().addingTimeInterval(0.35)
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+            if let cell = table.view(atColumn: 0, row: bottomRow, makeIfNecessary: false),
+               let textView = firstTextView(in: cell) {
+                textYs.append(textView.convert(NSPoint.zero, to: table).y)
+            }
+        }
+        settle()
+        print("— edit-open stationarity —")
+        print("  samples=\(textYs.count)  yRange=\(String(describing: textYs.min()))…\(String(describing: textYs.max()))")
+        if let minY = textYs.min(), let maxY = textYs.max() {
+            check(
+                maxY - minY < 0.5,
+                "the editor's text must not move while the open animation runs "
+                    + "(drifted \(maxY - minY) points)"
+            )
+        } else {
+            fail("no editor samples were captured during the open animation")
+        }
+        selection.endEditing()
+        settle()
+
         checkTallEditReveal(table: table, store: store, selection: selection, clipView: clipView)
     }
 

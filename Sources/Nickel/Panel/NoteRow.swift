@@ -169,21 +169,10 @@ struct NoteRowContent: View {
         )
         .padding(.horizontal, NoteRowMetrics.horizontalPadding)
         .padding(.vertical, NoteRowMetrics.verticalPadding)
-        // The card fills whatever height the cell currently has, with the
-        // text pinned to the top and clipped to the card shape. While the
-        // table animates the row's height, the cell is briefly shorter (or
-        // taller) than the content's final layout; filling the animated
-        // bounds keeps the card's bottom edge — rounded corners intact —
-        // riding the animation, revealing (or covering) the stationary text
-        // beneath it. At rest the frame equals the content's ideal size, so
-        // none of this is visible. Measurement is unaffected: a nil height
-        // proposal passes through `maxHeight: .infinity` to the content.
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
             RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
         )
-        .clipShape(RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous))
         // The selected look, drawn here rather than by `NSTableRowView`'s
         // default fill: an outline, not a filled highlight. `NoteListRowView`
         // suppresses AppKit's own selection drawing so this is the only one.
