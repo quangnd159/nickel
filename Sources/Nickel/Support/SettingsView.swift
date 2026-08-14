@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Nickel's Settings window: Launch at Login, Keep Panel on Top, and a
+/// Nickel's Settings window: Launch at login, Keep panel on top, and a
 /// manual "Check for Updates…" row. Uses the System Settings visual idiom
 /// (`.formStyle(.grouped)`) to read as native chrome rather than part of the
 /// panel itself.
@@ -19,17 +19,17 @@ struct SettingsView: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Launch at Login", isOn: $launchAtLogin)
+                Toggle("Launch at login", isOn: $launchAtLogin)
                     .onChange(of: launchAtLogin) { _, newValue in
                         LaunchAtLogin.setEnabled(newValue)
                     }
 
-                Toggle("Keep Panel on Top", isOn: $keepOnTop)
+                Toggle("Keep panel on top", isOn: $keepOnTop)
                     .onChange(of: keepOnTop) { _, newValue in
                         PanelSettings.keepPanelOnTop = newValue
                     }
 
-                Toggle("Show Menu Bar Icon", isOn: $showMenuBarIcon)
+                Toggle("Show menu bar icon", isOn: $showMenuBarIcon)
                     .onChange(of: showMenuBarIcon) { _, newValue in
                         PanelSettings.showMenuBarIcon = newValue
                     }
@@ -54,7 +54,7 @@ struct SettingsView: View {
                     PanelSettings.captureKey = newValue
                 }
 
-                Picker("Show/Hide Panel", selection: $panelToggleKey) {
+                Picker("Show/hide panel", selection: $panelToggleKey) {
                     ForEach(ModifierKey.allCases, id: \.self) { key in
                         Text(key.displayName).tag(key)
                     }

@@ -32,7 +32,13 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     private static let savedFrameDefaultsKey = "NickelPanelFrame"
     private static let toggleSlideOffset: CGFloat = 8
-    private static let toggleAnimationDuration: TimeInterval = 0.18
+
+    /// A computed var, not a stored constant, so a live Reduce Motion toggle
+    /// collapses the slide to instant on the very next show/hide — read at
+    /// animation time, same as `Animation.noteRowSpring`/`.panelOverlay`.
+    private static var toggleAnimationDuration: TimeInterval {
+        Motion.isReduced ? 0 : 0.18
+    }
 
     convenience init(store: NoteStore) {
         let size = NSSize(width: 360, height: 560)
@@ -214,6 +220,14 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
 
     // MARK: - Composer focus
 
+    /// The search capsule's `NSTextField`, registered by
+    /// `SearchField.updateNSView` once it's in the window. Unlike the
+    /// composer, the search field gets the window's *standard* field editor
+    /// (no custom identity to check), so `syncComposerFocus` tells it apart
+    /// by the field editor's `delegate` — AppKit sets that to the
+    /// `NSTextField` client itself — matched against this reference instead.
+    weak var searchField: NSTextField?
+
     /// Every first-responder change in this window funnels through here, so
     /// this is where `SelectionModel.isComposerFocused` is kept true — the
     /// composer's "#" suggestion popup and its focus ring both follow it.
@@ -274,9 +288,11 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     private func syncComposerFocus() {
         guard isPanelKey || isKeyWindow, let editor = firstResponder as? NSTextView else {
             selectionModel?.setComposerFocused(false)
+            selectionModel?.setSearchFocused(false)
             return
         }
         selectionModel?.setComposerFocused(editor === dragRejectingFieldEditor)
+        selectionModel?.setSearchFocused(searchField != nil && editor.delegate === searchField)
     }
 
     func windowDidMove(_ notification: Notification) {
