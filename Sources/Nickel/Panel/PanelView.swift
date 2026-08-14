@@ -440,6 +440,8 @@ struct PanelView: View {
                     .fill(Color(nsColor: .textBackgroundColor).opacity(0.85))
                     .panelElevation()
             )
+            .accessibilityLabel("More")
+            .help("More options")
         }
     }
 
@@ -562,6 +564,8 @@ struct PanelView: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Attach files")
+                .help("Attach files")
             }
         }
         // Dimmed rather than removed while a drag is targeted, so the

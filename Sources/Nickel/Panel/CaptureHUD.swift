@@ -70,6 +70,19 @@ private final class HUDInstance {
             return
         }
 
+        // The panel can never become key (see `HUDPanel`), so it's never the
+        // system's accessibility focus target. Post the announcement against
+        // the app's key window instead, falling back to the panel itself —
+        // VoiceOver otherwise has nothing to hang the announcement on.
+        NSAccessibility.post(
+            element: NSApp.mainWindow ?? panel,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ]
+        )
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.12
             panel.animator().alphaValue = 1
@@ -155,7 +168,10 @@ private final class HUDContentView: NSView {
         addSubview(blur)
 
         let icon = NSImageView()
-        icon.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        icon.image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: Self.iconDescription(for: symbolName)
+        )
         icon.symbolConfiguration = .init(pointSize: 13, weight: .medium)
         icon.translatesAutoresizingMaskIntoConstraints = false
         addSubview(icon)
@@ -187,5 +203,18 @@ private final class HUDContentView: NSView {
         wantsLayer = true
         layer?.cornerRadius = bounds.height / 2
         layer?.masksToBounds = true
+    }
+
+    /// A short noun describing the glyph itself, for VoiceOver — distinct
+    /// from `message`, which is the toast's own announced text.
+    private static func iconDescription(for symbolName: String) -> String {
+        switch symbolName {
+        case "checkmark.circle.fill":
+            return "Success"
+        case "exclamationmark.circle.fill":
+            return "Warning"
+        default:
+            return "Notification"
+        }
     }
 }

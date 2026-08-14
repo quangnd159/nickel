@@ -66,11 +66,14 @@ struct LogbookDayHeader: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Text(Self.dayFormatter.string(from: day).uppercased())
+            Text(Self.dayFormatter.string(from: day))
+                .textCase(.uppercase)
                 .font(.system(size: 11, weight: .semibold))
                 .tracking(0.8)
                 .foregroundStyle(.secondary)
                 .fixedSize()
+                .accessibilityLabel(Self.dayFormatter.string(from: day))
+                .accessibilityAddTraits(.isHeader)
 
             Rectangle()
                 .fill(.quaternary)
