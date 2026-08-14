@@ -266,26 +266,22 @@ final class SelectionModel: ObservableObject {
 
     // MARK: - Inline editing
 
+    // Neither direction runs inside `withAnimation` — same as
+    // `toggleExpanded`. The row's growth/collapse is animated by the table
+    // (`NoteListCoordinator`'s height flush); the SwiftUI content must snap
+    // to its final layout instantly so the card the table is animating never
+    // moves against it. A SwiftUI spring here nests a second, differently
+    // curved animation inside AppKit's, which reads as the card bouncing and
+    // the text jumping.
+
     func beginEditing(id: UUID, text: String) {
-        // Same spring as `endEditing`, so opening into edit and collapsing
-        // back out are one continuous motion (the editor keeps the caret
-        // revealed while the row grows — see `InlineNoteEditorField`).
-        withAnimation(.noteRowSpring) {
-            editingID = id
-            editingText = text
-        }
+        editingID = id
+        editingText = text
     }
 
     func endEditing() {
-        // Ending an edit collapses the row back to its preview and reflows
-        // everything below; the list's shared spring keeps that motion
-        // trackable. Beginning an edit deliberately stays instant — the
-        // editor must be typeable immediately, and the caret reveal
-        // measures final layout, which an in-flight animation would break.
-        withAnimation(.noteRowSpring) {
-            editingID = nil
-            editingText = ""
-        }
+        editingID = nil
+        editingText = ""
     }
 
     // MARK: - Section rename

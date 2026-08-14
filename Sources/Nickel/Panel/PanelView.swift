@@ -1181,10 +1181,11 @@ struct PanelView: View {
     }
 }
 
-/// The note list's one shared row motion. Everything that reflows rows —
-/// insert/delete/move, expand/collapse, section changes, and ending an
-/// inline edit (`SelectionModel.endEditing`) — uses this same spring so the
-/// list moves as one system.
+/// The note list's one shared SwiftUI row motion (section changes, the
+/// Logbook swap). Row *height* changes — expand/collapse and inline
+/// editing — are deliberately not animated here: the table animates the
+/// row's frame itself (`NoteListCoordinator`'s height flush), and a SwiftUI
+/// animation on the same change would nest a second curve inside it.
 ///
 /// Both are computed vars, not stored constants, so a live Reduce Motion
 /// toggle (`Motion.isReduced`, read at animation time) takes effect on the

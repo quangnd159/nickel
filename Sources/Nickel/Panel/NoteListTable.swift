@@ -569,7 +569,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         // new row geometry and animate the scroll alongside the growth
         // instead of chasing it afterwards.
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = animates ? 0.24 : 0
+            context.duration = (animates && !Motion.isReduced) ? 0.24 : 0
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             if !indexes.isEmpty {
                 tableView.noteHeightOfRows(withIndexesChanged: indexes)
