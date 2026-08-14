@@ -265,10 +265,39 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
 
         // Exactly what `acceptDrop` does for a drop in the gap below the
         // "Probe Section" header — the section is empty, so that gap resolves
-        // to its end — plus keeping the dragged notes selected.
+        // to its end — plus keeping the dragged notes selected and re-seating
+        // the rows as moves.
         store.move(ids: [moved.id], toSection: "Probe Section", before: nil)
         selection.selectedIDs = [moved.id]
+
+        guard let coordinator = table.coordinator else {
+            fail("the table has no coordinator")
+            return
+        }
+        let expectedRows = NoteListRows.rows(store: store, selection: selection)
+        coordinator.applyDropAsMoves(to: expectedRows)
+
+        // Checked before settling, deliberately: the drop's own transaction has
+        // to leave the table already agreeing with the store. Anything left for
+        // the next update to notice would be a reorder the diff expresses as a
+        // remove and an insert — the flash the move path exists to avoid.
+        check(
+            coordinator.rows == expectedRows,
+            "the table's rows match the store immediately after the drop transaction"
+        )
+        check(
+            table.numberOfRows == expectedRows.count,
+            "the table's row count matches immediately after the drop transaction "
+                + "(\(table.numberOfRows) vs \(expectedRows.count))"
+        )
+
         settle()
+
+        // And nothing was left over for the next update to animate.
+        check(
+            NoteListDiff.steps(from: coordinator.rows, to: NoteListRows.rows(store: store, selection: selection)).isEmpty,
+            "the update after a drop has nothing left to diff"
+        )
 
         guard let rows = table.coordinator?.rows,
               let afterRow = rows.firstIndex(of: .note(moved.id)) else {

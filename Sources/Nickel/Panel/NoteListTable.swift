@@ -749,10 +749,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         let ids = draggedNoteIDs
         guard !ids.isEmpty else { return false }
 
-        // The store is told, and the list follows from it through the same
-        // diff every other change goes through — no `moveRow` calls here.
-        // Driving the rows directly would make the table a second source of
-        // truth for their order, and the two would eventually disagree.
+        // The store is told first and stays the only truth for note order.
         store.move(ids: ids, toSection: target.section, before: target.beforeID)
 
         // The dragged notes stay selected. This looks like the opposite of the
@@ -761,7 +758,83 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         // keeping them selected would strand a selection off screen. Here they
         // are still right there, under the pointer that just put them down.
         selection.selectedIDs = Set(ids)
+
+        // Then the rows are *moved* into place rather than left to the diff,
+        // which would remove and re-insert them — the dragged row fading out
+        // of the gap it was dropped into and fading back in. See
+        // `applyDropAsMoves`.
+        applyDropAsMoves(to: NoteListRows.rows(store: store, selection: selection))
+        landDragImages(info, on: ids)
         return true
+    }
+
+    /// Re-seats the rows a drop moved, as moves.
+    ///
+    /// The store has already been mutated; this is presentation only, and it
+    /// deliberately runs to the *same* order the store now implies, so the
+    /// update that follows diffs to nothing. Without it that update would be
+    /// the first thing to notice the new order, and would express it as a
+    /// removal plus an insertion — the row disappearing and reappearing, which
+    /// is exactly the flash a drop shouldn't have.
+    ///
+    /// A drop only ever permutes rows: a note's identity doesn't change when it
+    /// moves between sections, and headers exist whether or not their section
+    /// has notes. Anything else falls through to the ordinary diff.
+    func applyDropAsMoves(to newRows: [NoteListRow]) {
+        guard newRows.count == rows.count, Set(newRows) == Set(rows) else { return }
+
+        var working = rows
+        var moves: [(from: Int, to: Int)] = []
+        for targetIndex in newRows.indices {
+            let item = newRows[targetIndex]
+            guard let currentIndex = working.firstIndex(of: item), currentIndex != targetIndex else { continue }
+            working.remove(at: currentIndex)
+            working.insert(item, at: targetIndex)
+            moves.append((from: currentIndex, to: targetIndex))
+        }
+        guard !moves.isEmpty else { return }
+
+        // The model goes first: the table asks for views and heights during the
+        // animation, and every index it asks about has to already mean what it
+        // will mean when the animation lands.
+        rows = newRows
+        isSyncingSelection = true
+        tableView.beginUpdates()
+        for move in moves {
+            tableView.moveRow(at: move.from, to: move.to)
+        }
+        tableView.endUpdates()
+        isSyncingSelection = false
+    }
+
+    /// Animates the floating drag image onto the row it became, so what the
+    /// pointer let go of is what settles into the list.
+    ///
+    /// The documented sequence: set `animatesToDestination`, then set each
+    /// dragging item's `draggingFrame` to its destination, both during the
+    /// drop — "you should enumerate through the dragging items during
+    /// `performDragOperation:` to set the item's `draggingFrame` to the correct
+    /// destinations", which for a table view is this method. Enumeration order
+    /// matches the order the items were written in `pasteboardWriterForRow`,
+    /// which is ascending row order — the same order as `ids` — so a
+    /// multi-note drag lands each image on its own row.
+    private func landDragImages(_ info: NSDraggingInfo, on ids: [UUID]) {
+        let frames = ids.compactMap { id -> NSRect? in
+            guard let row = rows.firstIndex(of: .note(id)) else { return nil }
+            return tableView.frameOfCell(atColumn: 0, row: row)
+        }
+        guard frames.count == ids.count else { return }
+
+        info.animatesToDestination = true
+        info.enumerateDraggingItems(
+            options: [],
+            for: tableView,
+            classes: [NSPasteboardItem.self],
+            searchOptions: [:]
+        ) { item, index, _ in
+            guard frames.indices.contains(index) else { return }
+            item.draggingFrame = frames[index]
+        }
     }
 
     private func resolveDrop(
