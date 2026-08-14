@@ -240,9 +240,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         // both items act on the one panel, same as every View item below.
         let fileMenuItem = NSMenuItem()
         let fileMenu = NSMenu(title: "File")
-        fileMenu.addItem(windowMenuItem(for: .newNote, action: #selector(newNote)))
+        fileMenu.addItem(windowShortcutMenuItem(for: .newNote, action: #selector(newNote)))
         fileMenu.addItem(.separator())
-        fileMenu.addItem(windowMenuItem(for: .closePanel, action: #selector(closePanel)))
+        fileMenu.addItem(windowShortcutMenuItem(for: .closePanel, action: #selector(closePanel)))
         fileMenuItem.submenu = fileMenu
         mainMenu.addItem(fileMenuItem)
 
@@ -275,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         )
         editMenu.addItem(.separator())
-        editMenu.addItem(windowMenuItem(for: .findFocus, action: #selector(focusSearch)))
+        editMenu.addItem(windowShortcutMenuItem(for: .findFocus, action: #selector(focusSearch)))
         editMenu.addItem(.separator())
         // No target: routed through the responder chain to the system's own
         // handler, which supplies the fn/🌐 key equivalent itself.
@@ -297,17 +297,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         let viewMenuItem = NSMenuItem()
         let viewMenu = NSMenu(title: "View")
 
-        viewMenu.addItem(windowMenuItem(for: .sectionSwitcher, action: #selector(switchSection)))
-        viewMenu.addItem(windowMenuItem(for: .moveToSection, action: #selector(moveToSection)))
+        viewMenu.addItem(windowShortcutMenuItem(for: .sectionSwitcher, action: #selector(switchSection)))
+        viewMenu.addItem(windowShortcutMenuItem(for: .moveToSection, action: #selector(moveToSection)))
 
         viewMenu.addItem(.separator())
 
-        viewMenu.addItem(windowMenuItem(for: .nextSection, action: #selector(nextSection)))
-        viewMenu.addItem(windowMenuItem(for: .previousSection, action: #selector(previousSection)))
+        viewMenu.addItem(windowShortcutMenuItem(for: .nextSection, action: #selector(nextSection)))
+        viewMenu.addItem(windowShortcutMenuItem(for: .previousSection, action: #selector(previousSection)))
 
         viewMenu.addItem(.separator())
 
-        viewMenu.addItem(windowMenuItem(for: .shortcutsCard, action: #selector(showKeyboardShortcuts)))
+        viewMenu.addItem(windowShortcutMenuItem(for: .shortcutsCard, action: #selector(showKeyboardShortcuts)))
 
         viewMenuItem.submenu = viewMenu
         mainMenu.addItem(viewMenuItem)
@@ -366,7 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// Builds a menu item from `WindowShortcuts`' table entry for `command`
     /// — the single source of truth its title and key equivalent come from
     /// (see `PanelShortcuts.swift`'s `WindowShortcut`).
-    private func windowMenuItem(for command: WindowCommand, action: Selector) -> NSMenuItem {
+    private func windowShortcutMenuItem(for command: WindowCommand, action: Selector) -> NSMenuItem {
         let shortcut = WindowShortcuts.shortcut(for: command)
         let item = NSMenuItem(title: shortcut.menuTitle, action: action, keyEquivalent: shortcut.menuKeyEquivalent.key)
         item.keyEquivalentModifierMask = shortcut.menuKeyEquivalent.modifiers
