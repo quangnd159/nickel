@@ -4,6 +4,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem?
     private var panel: FloatingPanel?
     private var trustPollTimer: Timer?
+    private var wasTrusted = Permissions.isTrusted
 
     private let noteStore = NoteStore()
     private lazy var noteEditorWindows = NoteEditorWindowManager(store: noteStore)
@@ -56,25 +57,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private func startHotkeyMonitorOrPromptForAccess() {
         if Permissions.isTrusted {
             HotkeyMonitor.shared.start()
-            return
+        } else {
+            // Triggers the native "Nickel.app would like to control this
+            // computer" system dialog, which also registers Nickel in the
+            // Accessibility list.
+            Permissions.requestIfNeeded()
         }
 
-        // Triggers the native "Nickel.app would like to control this
-        // computer" system dialog, which also registers Nickel in the
-        // Accessibility list.
-        Permissions.requestIfNeeded()
-
+        // Accessibility trust can change in either direction at any time —
+        // the user can revoke it (or re-grant it) in System Settings while
+        // Nickel keeps running — and macOS has no public notification for
+        // that change, only the polling `AXIsProcessTrusted` check wrapped
+        // by `Permissions.isTrusted`. So this timer never self-invalidates:
+        // it runs for the app's lifetime, watching for trust to flip in
+        // either direction and starting/stopping the hotkey monitor to
+        // match.
         trustPollTimer?.invalidate()
-        trustPollTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] timer in
+        trustPollTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] timer in
             guard let self else {
                 timer.invalidate()
                 return
             }
-            guard Permissions.isTrusted else { return }
-            timer.invalidate()
-            self.trustPollTimer = nil
-            HotkeyMonitor.shared.start()
+            let isTrusted = Permissions.isTrusted
+            guard let action = Self.trustTransitionAction(was: self.wasTrusted, now: isTrusted) else { return }
+            self.wasTrusted = isTrusted
+            switch action {
+            case .start:
+                HotkeyMonitor.shared.start()
+            case .stop:
+                HotkeyMonitor.shared.stop()
+            }
         }
+        trustPollTimer?.tolerance = 0.5
+    }
+
+    enum TrustAction: Equatable {
+        case start
+        case stop
+    }
+
+    /// Pure decision for the trust-watcher timer: given the trust state at
+    /// the previous tick and now, what should happen to the hotkey monitor?
+    /// `nil` means no transition occurred.
+    static func trustTransitionAction(was: Bool, now: Bool) -> TrustAction? {
+        guard now != was else { return nil }
+        return now ? .start : .stop
     }
 
     /// Routes by the user's configured keys, read live so a Settings change
