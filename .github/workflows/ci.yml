@@ -14,6 +14,9 @@ jobs:
         run: swift build
       - name: Test
         run: swift test
+      # Offscreen row-geometry checks (heights, hit-testing, reveal) that
+      # swift test can't cover. timeout-minutes guards a hung runloop —
+      # macOS runners have no GNU `timeout` binary.
       - name: UI geometry probe
-        run: |
-          NICKEL_UI_PROBE=1 timeout 120 .build/debug/Nickel
+        timeout-minutes: 5
+        run: NICKEL_UI_PROBE=1 .build/debug/Nickel
