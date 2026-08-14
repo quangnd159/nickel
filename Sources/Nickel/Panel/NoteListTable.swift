@@ -137,6 +137,39 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     private var lastEditingID: UUID?
     private var lastExpandedIDs: Set<UUID> = []
 
+    /// Everything the heavy tail of `update(...)` depends on besides the row
+    /// array itself. `editingText` is deliberately ABSENT: a keystroke
+    /// changes it but never the rows or any row's height (the editing
+    /// cell's own SwiftUI content reports its settled height directly — see
+    /// `rowHeight(_:didSettleIn:)`), so leaving it out is what lets every
+    /// keystroke skip the tail below.
+    private struct UpdateStamp: Equatable {
+        var notesRevision: Int
+        var selectedIDs: Set<UUID>
+        var editingID: UUID?
+        var expandedIDs: Set<UUID>
+        var isShowingLogbook: Bool
+        var activeSection: String?
+        var searchText: String
+    }
+
+    private var lastUpdateStamp: UpdateStamp?
+
+    /// The `notesRevision` last seen by `invalidateChangedRowHeights`, so its
+    /// per-note walk runs only when notes actually changed rather than on
+    /// every update (a row-neutral change like a selection click still calls
+    /// it).
+    private var lastSeenRevision = -1
+
+    #if DEBUG
+    /// Every call into `update(...)`, whether or not it short-circuits.
+    /// Probe-only, for asserting typing doesn't run the full pipeline.
+    private(set) var updateRunCount = 0
+    /// Only the calls that ran the heavy tail (rebuilt cells, re-diffed
+    /// heights, etc.) rather than short-circuiting on the stamp.
+    private(set) var heavyUpdateRunCount = 0
+    #endif
+
     init(mode: NoteListMode) {
         self.mode = mode
     }
@@ -223,11 +256,36 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     // MARK: State push
 
     func update(store: NoteStore, selection: SelectionModel, actions: PanelActions) {
+        #if DEBUG
+        updateRunCount += 1
+        #endif
         self.store = store
         self.selection = selection
         self.actions = actions
 
         let newRows = NoteListRows.rows(store: store, selection: selection)
+        let stamp = UpdateStamp(
+            notesRevision: store.notesRevision,
+            selectedIDs: selection.selectedIDs,
+            editingID: selection.editingID,
+            expandedIDs: selection.expandedIDs,
+            isShowingLogbook: selection.isShowingLogbook,
+            activeSection: store.activeSection,
+            searchText: selection.searchText
+        )
+        // Nothing the tail below depends on has changed since the last
+        // update — a keystroke in an editing note, most commonly. Skip
+        // straight to the one bit of housekeeping that's cheap and
+        // load-bearing on first show.
+        if newRows == rows && stamp == lastUpdateStamp {
+            claimFocusIfNothingHasIt()
+            return
+        }
+        lastUpdateStamp = stamp
+        #if DEBUG
+        heavyUpdateRunCount += 1
+        #endif
+
         let steps = NoteListDiff.steps(from: rows, to: newRows)
 
         isSyncingSelection = true
@@ -423,6 +481,9 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// keeping the old height until the new one is known rather than flashing
     /// through a placeholder. Also drops heights for rows that are gone.
     private func invalidateChangedRowHeights() {
+        guard store.notesRevision != lastSeenRevision else { return }
+        lastSeenRevision = store.notesRevision
+
         var current: [UUID: Note] = [:]
         current.reserveCapacity(store.notes.count)
         for note in store.notes {
@@ -459,6 +520,24 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     func invalidateAllRowHeights() {
         guard !rows.isEmpty else { return }
         staleHeightRows.formUnion(rows)
+        scheduleHeightFlush()
+    }
+
+    /// A cheaper version of `invalidateAllRowHeights` for a live resize's own
+    /// re-measure, called once per drag step: only the rows currently on (or
+    /// just past) screen are marked stale, not the whole list. Offscreen rows
+    /// keep their pre-resize heights — stale but still readable — until
+    /// `viewDidEndLiveResize` sweeps up the rest, or the user scrolls one
+    /// into view (the `heightOfRow` miss path measures it on demand anyway).
+    func invalidateVisibleRowHeights() {
+        guard !rows.isEmpty else { return }
+        let overscan = 10
+        let visible = tableView.rows(in: tableView.visibleRect)
+        guard visible.location != NSNotFound else { return }
+        let lower = max(0, visible.location - overscan)
+        let upper = min(rows.count, visible.location + visible.length + overscan)
+        guard lower < upper else { return }
+        staleHeightRows.formUnion(rows[lower..<upper])
         scheduleHeightFlush()
     }
 
@@ -982,11 +1061,30 @@ final class NoteListTableView: NSTableView {
     override var acceptsFirstResponder: Bool { true }
 
     /// A narrower list rewraps every row's text, so every height the table
-    /// cached is stale.
+    /// cached is stale. During a live resize this fires once per drag step,
+    /// so only the rows on screen (plus a small overscan) are re-measured
+    /// immediately — the rest stay stale-marked and are swept up by
+    /// `viewDidEndLiveResize` once the drag settles. Outside a live resize
+    /// (a programmatic width change) every row is re-measured right away, as
+    /// before.
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = newSize.width != frame.width
         super.setFrameSize(newSize)
-        if widthChanged { coordinator?.invalidateAllRowHeights() }
+        guard widthChanged else { return }
+        if inLiveResize {
+            coordinator?.invalidateVisibleRowHeights()
+        } else {
+            coordinator?.invalidateAllRowHeights()
+        }
+    }
+
+    /// The drag has settled: sweep up every row the live resize left
+    /// stale-marked but didn't get around to re-measuring (offscreen ones,
+    /// mainly — `invalidateVisibleRowHeights` only covered what was on
+    /// screen at each step).
+    override func viewDidEndLiveResize() {
+        super.viewDidEndLiveResize()
+        coordinator?.invalidateAllRowHeights()
     }
 
     /// The click's position in the CELL's coordinate space, not the row's:
