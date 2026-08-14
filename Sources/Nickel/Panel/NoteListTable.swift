@@ -1243,6 +1243,10 @@ final class NoteListCellView: NSTableCellView {
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
+        // Mid-height-animation the cell is shorter than its content; the
+        // top-pinned overflow (see `applyContent`) must not paint over the
+        // row below while the gap for it is still opening.
+        clipsToBounds = true
         host.translatesAutoresizingMaskIntoConstraints = false
         host.sizingOptions = [.intrinsicContentSize]
         addSubview(host)
@@ -1304,7 +1308,17 @@ final class NoteListCellView: NSTableCellView {
             host.rootView = baseContent
             return
         }
-        host.rootView = AnyView(baseContent.frame(width: contentWidth, alignment: .leading))
+        // The outer flexible frame pins the content to the top: while a row's
+        // height animates, the cell is briefly shorter than the content's
+        // ideal height, and SwiftUI's default is to center over-tall content
+        // — which reads as the text sliding down from above the card while
+        // the card grows. Top-pinned (and clipped by the cell), the text
+        // stays put and the growing card simply reveals more of it.
+        host.rootView = AnyView(
+            baseContent
+                .frame(width: contentWidth, alignment: .leading)
+                .frame(maxHeight: .infinity, alignment: .top)
+        )
         host.contentDidChange()
     }
 }
