@@ -99,12 +99,10 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         }
 
         /// The height of the end sliver a `rowEnd` reveal asks for, measured
-        /// up from the row's bottom: the card's bottom chrome — padding,
-        /// stroke, corner radius, and the gap below the card — plus the line
-        /// of text the caret sits on. Revealing this much shows the card
-        /// visibly closed with the caret on the last line inside it.
+        /// up from the row's bottom. Shared with the editor's own caret follow
+        /// so opening an edit and typing in it agree to the point.
         static var endSliverHeight: CGFloat {
-            NoteRowMetrics.textLineHeight + NoteRowMetrics.bottomChromeHeight
+            NoteRowMetrics.caretRevealHeight()
         }
 
         func rect(in rowRect: NSRect) -> NSRect {
@@ -347,7 +345,12 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// it had no cell to report for itself. Runs from the deferred flush,
     /// never inside a layout pass. Returns the rows whose height moved.
     private func measureOutstandingRowHeights() -> IndexSet {
-        let width = tableView.bounds.width
+        // The column's width, not the table's: `.fullWidth` style insets the
+        // cells inside the table, so measuring at the table's width lays the
+        // text out wider than the row ever will. Text that wraps the same at
+        // both widths hides it; text that doesn't comes out a line short, and
+        // the row is then revealed at a height it doesn't have.
+        let width = tableView.tableColumns.first?.width ?? tableView.bounds.width
         guard width > 0 else { return IndexSet() }
         var changed = IndexSet()
         var usedMeasuringHost = false

@@ -205,6 +205,13 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         // must never be left stranded past the end of the content.
         checkReveal(table: table, store: store, selection: selection)
 
+        // Every row's cached height — what a reveal is computed from — has to
+        // be the height its cell actually lays out at. A sweep rather than one
+        // sample: the two only diverge for text that wraps differently at the
+        // measured width than at the real one, so a single note can easily
+        // agree by luck.
+        checkCachedHeightsMatchCells(table: table)
+
         // (h) Section headers are group rows with their own, much smaller
         // content — they went through the same broken measurement.
         store.createSection(named: "Probe Section")
@@ -359,9 +366,17 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         clipView: NSClipView
     ) {
         store.add(text: Self.veryLongNoteText, sourceApp: nil)
+        let tallNoteID = store.activeNotes.last?.id
+        // Rows below it, so the reveal is computed on its own merits instead
+        // of being pinned by the clamp at the end of the content — which is
+        // what hid the two reveal paths disagreeing.
+        for index in 0..<6 {
+            store.add(text: "Tail note \(index)", sourceApp: nil)
+        }
         settle()
 
-        guard let tallNote = store.activeNotes.last,
+        guard let tallNoteID,
+              let tallNote = store.activeNotes.first(where: { $0.id == tallNoteID }),
               let tallRow = table.coordinator?.rows.firstIndex(of: .note(tallNote.id)) else {
             fail("could not find the very long note's row")
             return
@@ -381,6 +396,19 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         }
         let card = cell.convert(cell.bounds, to: table)
         print("  card=\(card)  cardBottom−visibleBottom=\(card.maxY - visible.maxY)")
+        if let cell = cell as? NoteListCellView {
+            print("  tableWidth=\(table.bounds.width)  cellWidth=\(cell.bounds.width)")
+            print("  frameOfCell=\(table.frameOfCell(atColumn: 0, row: tallRow).width)  column=\(table.tableColumns[0].width)")
+            print("  cachedRowHeight=\(rowRect.height)  liveCellIdeal=\(cell.contentIdealHeight)")
+            // The invariant that keeps the begin-edit reveal and the caret
+            // follow agreeing: the height the reveal was computed from is the
+            // height the row actually ended up with.
+            check(
+                abs((rowRect.height - table.intercellSpacing.height) - cell.contentIdealHeight) < 0.5,
+                "the row height the reveal used (\(rowRect.height - table.intercellSpacing.height)) "
+                    + "must match what the cell actually lays out at (\(cell.contentIdealHeight))"
+            )
+        }
 
         check(
             rowRect.height > visible.height,
@@ -398,16 +426,21 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             "the card's bottom corners should be fully on screen "
                 + "(corner starts \(card.maxY - NoteRowMetrics.cornerRadius), viewport starts \(visible.minY))"
         )
+        // Two-sided on purpose. Scrolling too far is as wrong as too short,
+        // and both come from the same fault — a row revealed at a height it
+        // doesn't have. Under-measure and the card lands below the viewport
+        // (clipped); over-measure and the list overshoots past it.
         check(
-            rowRect.maxY <= visible.maxY + 0.5,
-            "the row's bottom, gap included, should sit at or above the viewport's "
-                + "(\(rowRect.maxY) vs \(visible.maxY))"
+            abs(rowRect.maxY - visible.maxY) < 0.5,
+            "the reveal should seat the row's bottom exactly on the viewport's "
+                + "(row ends \(rowRect.maxY), viewport ends \(visible.maxY))"
         )
 
         // Typing is the case that actually bites: `NSTextView` reveals the
         // caret itself on every insertion, and its idea of the caret is the
         // glyph, with none of the card around it.
         if let textView = firstTextView(in: cell) {
+            let beforeTyping = clipView.bounds.origin.y
             textView.insertText("x", replacementRange: textView.selectedRange())
             settle()
             let typedVisible = clipView.documentVisibleRect
@@ -420,12 +453,51 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
                 "typing on the last line must keep the card's bottom edge visible "
                     + "(card ends \(typedCard.maxY), viewport ends \(typedVisible.maxY))"
             )
+            // The point of the whole exercise: opening the edit has to land
+            // exactly where the caret-follow reveal would, so the first
+            // keystroke moves nothing at all.
+            check(
+                clipView.bounds.origin.y == beforeTyping,
+                "the first keystroke must not scroll at all "
+                    + "(was \(beforeTyping), now \(clipView.bounds.origin.y))"
+            )
         } else {
             fail("no text view in the editing cell")
         }
 
         selection.endEditing()
         settle()
+    }
+
+    /// Checks every row that has a cell: the height the table is using must be
+    /// the height that cell lays out at. Scrolls the list through so every row
+    /// gets a cell at some point.
+    private func checkCachedHeightsMatchCells(table: NoteListTableView) {
+        var mismatches: [String] = []
+        var checked = 0
+        let spacing = table.intercellSpacing.height
+
+        for row in 0..<table.numberOfRows {
+            table.scrollRowToVisible(row)
+            settle(seconds: 0.15)
+            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteListCellView,
+                  cell.contentIdealHeight > 0 else { continue }
+            checked += 1
+            let used = table.rect(ofRow: row).height - spacing
+            if abs(used - cell.contentIdealHeight) >= 0.5 {
+                mismatches.append("row \(row): using \(used), cell lays out at \(cell.contentIdealHeight)")
+            }
+        }
+
+        print("— cached heights vs cells —")
+        print("  checked \(checked) rows, \(mismatches.count) mismatched")
+        for mismatch in mismatches.prefix(6) {
+            print("    \(mismatch)")
+        }
+        check(
+            mismatches.isEmpty,
+            "every row's height must match its cell's layout (\(mismatches.count) of \(checked) wrong)"
+        )
     }
 
     private func firstTextView(in view: NSView) -> NSTextView? {

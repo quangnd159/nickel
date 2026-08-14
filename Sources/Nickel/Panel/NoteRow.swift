@@ -36,6 +36,19 @@ enum NoteRowMetrics {
     static var bottomChromeHeight: CGFloat {
         verticalPadding + NoteListMode.notes.rowSpacing / 2
     }
+
+    /// How much has to be on screen below the top of the caret's line for the
+    /// card to read as closed under it: the line itself, then the card's
+    /// bottom chrome.
+    ///
+    /// Two things reveal the caret — the list's coordinated reveal when an
+    /// edit opens (`NoteListCoordinator.PendingReveal`) and the editor's own
+    /// caret follow while typing (`InlineNoteTextView.scrollRangeToVisible`).
+    /// They both measure from here, so the first keystroke after opening an
+    /// edit lands the view exactly where it already was.
+    static func caretRevealHeight(lineHeight: CGFloat = textLineHeight) -> CGFloat {
+        lineHeight + bottomChromeHeight
+    }
 }
 
 /// A single note card: circle checkbox + note text (or an inline editor),
@@ -509,7 +522,7 @@ private final class InlineNoteTextView: NSTextView {
         rect.origin.x += textContainerOrigin.x
         rect.origin.y += textContainerOrigin.y
         rect.size.height = min(
-            rect.height + NoteRowMetrics.bottomChromeHeight,
+            NoteRowMetrics.caretRevealHeight(lineHeight: rect.height),
             bounds.maxY + NoteRowMetrics.bottomChromeHeight - rect.minY
         )
         scrollToVisible(rect)
