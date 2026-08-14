@@ -212,6 +212,10 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         // agree by luck.
         checkCachedHeightsMatchCells(table: table)
 
+        // A resize must keep the long row's height readable — not flash to
+        // the placeholder — until the flush re-measures it at the new width.
+        checkWidthInvalidation(table: table, panel: panel, row: longRow)
+
         // (h) Section headers are group rows with their own, much smaller
         // content — they went through the same broken measurement.
         store.createSection(named: "Probe Section")
@@ -607,6 +611,58 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             mismatches.isEmpty,
             "every row's height must match its cell's layout (\(mismatches.count) of \(checked) wrong)"
         )
+    }
+
+    /// A resize marks every row's cached height stale rather than wiping the
+    /// cache, so `heightOfRow` keeps answering with the pre-resize value
+    /// until the deferred flush re-measures — never the 45pt placeholder a
+    /// wipe would produce for a runloop turn. Checked immediately after the
+    /// resize, before spinning the runloop, then again once it settles.
+    private func checkWidthInvalidation(table: NoteListTableView, panel: FloatingPanel, row: Int) {
+        guard let delegate = table.delegate else {
+            fail("table has no delegate to probe (width invalidation)")
+            return
+        }
+        let beforeHeight = delegate.tableView?(table, heightOfRow: row)
+
+        let originalFrame = panel.frame
+        var narrower = originalFrame
+        narrower.size.width -= 40
+        panel.setFrame(narrower, display: true)
+
+        let duringHeight = delegate.tableView?(table, heightOfRow: row)
+        print("— width invalidation —")
+        print("  before=\(String(describing: beforeHeight))  immediately after resize=\(String(describing: duringHeight))")
+        check(
+            duringHeight == beforeHeight,
+            "right after a resize, a row's height should still read its pre-resize value, "
+                + "not the placeholder (before \(String(describing: beforeHeight)), "
+                + "immediately after \(String(describing: duringHeight)))"
+        )
+
+        settle()
+        table.scrollRowToVisible(row)
+        settle(seconds: 0.15)
+
+        guard let settledCell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NoteListCellView,
+              settledCell.contentIdealHeight > 0 else {
+            fail("no settled cell for the probed row after resizing")
+            panel.setFrame(originalFrame, display: true)
+            settle()
+            return
+        }
+        let spacing = table.intercellSpacing.height
+        let settledUsed = table.rect(ofRow: row).height - spacing
+        print("  settled: used=\(settledUsed)  cellIdeal=\(settledCell.contentIdealHeight)")
+        check(
+            abs(settledUsed - settledCell.contentIdealHeight) < 0.5,
+            "after settling post-resize, the row's height should match its cell's new layout "
+                + "(\(settledUsed) vs \(settledCell.contentIdealHeight))"
+        )
+
+        // Leave the panel as the rest of the probe found it.
+        panel.setFrame(originalFrame, display: true)
+        settle()
     }
 
     /// The table asks its delegate about row indices outside the current
