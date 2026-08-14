@@ -173,7 +173,7 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertEqual(secondRequest?.id, ids[1])
     }
 
-    func testCollapsingDoesNotSetRevealRequest() {
+    func testCollapsingSetsRevealRequestForTheCollapsedNote() {
         store.add(text: "a", sourceApp: nil)
         let id = store.notes[0].id
 
@@ -182,7 +182,11 @@ final class SelectionModelTests: XCTestCase {
 
         selection.toggleExpanded(ids: [id])
 
-        XCTAssertEqual(selection.revealRequest, afterExpand, "collapse only shrinks the row, so nothing needs revealing")
+        // Collapsing a note scrolled deep into leaves the shrunken row above
+        // the viewport, so it's revealed the same way expansion reveals —
+        // a fresh request (new token) targeting the collapsed note.
+        XCTAssertEqual(selection.revealRequest?.id, id)
+        XCTAssertNotEqual(selection.revealRequest, afterExpand, "collapse must issue its own reveal, not reuse expansion's")
     }
 
     func testSelectAllDoesNotSetRevealRequest() {

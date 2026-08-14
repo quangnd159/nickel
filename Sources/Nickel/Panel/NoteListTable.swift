@@ -595,10 +595,18 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// that prompted it has been applied. Nothing scrolls here: the scroll has
     /// to run in the same animation as the growth, or the list moves twice.
     private func notePendingReveal() {
-        if let editingID = selection.editingID, editingID != lastEditingID {
-            // Opening an inline edit puts the caret at the end of the note,
-            // so the end is what has to be on screen.
-            pendingReveal = .rowEnd(.note(editingID))
+        if selection.editingID != lastEditingID {
+            if let editingID = selection.editingID {
+                // Opening an inline edit puts the caret at the end of the
+                // note, so the end is what has to be on screen.
+                pendingReveal = .rowEnd(.note(editingID))
+            } else if let endedID = lastEditingID {
+                // Closing it collapses the row back to its preview — which
+                // can sit far above the viewport when the open scrolled down
+                // to the caret. The row just acted on stays visible, the
+                // same way the table keeps its selected row in view.
+                pendingReveal = .row(.note(endedID))
+            }
             scheduleHeightFlush()
         }
         guard let request = selection.revealRequest, request.token != lastRevealToken else { return }

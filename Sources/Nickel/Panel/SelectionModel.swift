@@ -388,6 +388,12 @@ final class SelectionModel: ObservableObject {
         if ids.isSubset(of: expandedIDs) {
             expandedIDs.subtract(ids)
             collapseHold.expanded.formUnion(ids)
+            // Collapsing a note scrolled deep into leaves the shrunken row
+            // above the viewport; keep it on screen the same way expansion
+            // does below.
+            if let target = visibleOrder.last(where: { ids.contains($0) }) {
+                revealRequest = RevealRequest(id: target)
+            }
         } else {
             expandedIDs.formUnion(ids)
             collapseHold.expanded.subtract(ids)
@@ -395,7 +401,6 @@ final class SelectionModel: ObservableObject {
             // Expansion grows the row downward, so a note near the viewport
             // bottom would disclose its content off-screen; reveal it the
             // way Finder's outline view reveals newly disclosed children.
-            // Collapse needs no reveal — the row only shrinks.
             if let target = visibleOrder.last(where: { ids.contains($0) }) {
                 revealRequest = RevealRequest(id: target)
             }

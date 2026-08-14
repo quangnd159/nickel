@@ -678,6 +678,19 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
 
         selection.endEditing()
         settle()
+
+        // Closing the edit collapses the row back to its preview far above
+        // where the caret reveal had scrolled to; the collapsed row must be
+        // brought back on screen in the same motion, not left out of view.
+        let closedVisible = clipView.documentVisibleRect
+        let closedRow = table.rect(ofRow: tallRow)
+        print("— after closing the tall edit —")
+        print("  visible=\(closedVisible)  row=\(closedRow)")
+        check(
+            closedRow.intersects(closedVisible),
+            "closing an edit must keep the collapsed row on screen "
+                + "(row \(closedRow), viewport \(closedVisible))"
+        )
     }
 
     /// Checks every row that has a cell: the height the table is using must be
