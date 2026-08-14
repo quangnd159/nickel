@@ -328,6 +328,15 @@ struct PanelView: View {
                     .fill(Color(nsColor: .textBackgroundColor).opacity(0.85))
                     .panelElevation()
             )
+            // Stands in for the field's own suppressed focus ring
+            // (`SearchField` sets `.focusRingType = .none`), mirroring the
+            // composer's substitute ring above: same full-strength accent
+            // stroke, same weight, centered on the capsule's edge.
+            .overlay(
+                Capsule()
+                    .stroke(Color(nsColor: .controlAccentColor), lineWidth: 3)
+                    .opacity(selection.isSearchFocused ? 1 : 0)
+            )
 
             Menu {
                 // Picking a destination leaves the Logbook, exactly as the ⌘K
@@ -858,7 +867,7 @@ struct PanelView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color.orange.opacity(0.2))
+                .fill(Color(nsColor: .systemOrange).opacity(0.2))
         )
     }
 
@@ -1226,11 +1235,40 @@ struct PanelView: View {
 /// insert/delete/move, expand/collapse, section changes, and ending an
 /// inline edit (`SelectionModel.endEditing`) — uses this same spring so the
 /// list moves as one system.
+///
+/// Both are computed vars, not stored constants, so a live Reduce Motion
+/// toggle (`Motion.isReduced`, read at animation time) takes effect on the
+/// very next reflow without any observer wiring.
 extension Animation {
-    static let noteRowSpring = Animation.spring(response: 0.3, dampingFraction: 0.8)
+    static var noteRowSpring: Animation {
+        Motion.isReduced ? .linear(duration: 0) : .spring(response: 0.3, dampingFraction: 0.8)
+    }
 
     /// The one motion every panel overlay (⌘K palette, ⌘/ shortcuts card)
     /// appears and disappears with, wherever it's dismissed from — the
     /// toggle, a click on the dim, or Esc handled up in `FloatingPanel`.
-    static let panelOverlay = Animation.easeOut(duration: 0.12)
+    static var panelOverlay: Animation {
+        Motion.isReduced ? .linear(duration: 0) : .easeOut(duration: 0.12)
+    }
+}
+
+/// System Reduce Motion, as read by every animated transition in the panel
+/// (note-row reflows, overlay presentation, the panel's own slide-in). A
+/// computed property rather than a cached flag: reading
+/// `NSWorkspace.shared.accessibilityDisplayShouldReduceMotion` fresh at each
+/// animation's start point picks up a live System Settings change on the
+/// very next animation, with no notification observer needed.
+enum Motion {
+    static var isReduced: Bool {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+    }
+}
+
+/// The modal scrim behind the ⌘K palette and ⌘/ shortcuts card. Legible in
+/// both appearances: a fixed low-opacity black nearly disappears against a
+/// dark background, so dark mode gets more dimming than light.
+extension Color {
+    static func overlayScrim(for colorScheme: ColorScheme) -> Color {
+        Color.black.opacity(colorScheme == .dark ? 0.35 : 0.15)
+    }
 }

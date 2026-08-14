@@ -13,23 +13,38 @@ extension Notification.Name {
 /// text field or highlighted-row state.
 struct ShortcutsOverlay: View {
     @EnvironmentObject private var selection: SelectionModel
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                Color.black.opacity(0.15)
+                Color.overlayScrim(for: colorScheme)
                     .contentShape(Rectangle())
                     .onTapGesture { dismiss() }
 
                 card
                     .frame(width: min(geometry.size.width - 48, 300))
+                    .frame(maxHeight: geometry.size.height - 96)
                     .padding(.top, 48)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
+    /// Scrolls when the groups overflow the panel's height; keeps its
+    /// intrinsic size (no visible scroll affordance) when they fit — the
+    /// default 560pt panel is tall enough for most, but not every, capture
+    /// key setting.
     private var card: some View {
+        ScrollView {
+            cardContent
+        }
+        .scrollIndicators(.automatic)
+        .fixedSize(horizontal: false, vertical: true)
+        .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
+    }
+
+    private var cardContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Keyboard Shortcuts")
                 .font(.system(size: 13, weight: .semibold))
@@ -69,7 +84,6 @@ struct ShortcutsOverlay: View {
             ])
         }
         .padding(16)
-        .glassEffect(.regular, in: .rect(cornerRadius: 14, style: .continuous))
     }
 
     /// One shortcut group: a tiny secondary header followed by its rows.

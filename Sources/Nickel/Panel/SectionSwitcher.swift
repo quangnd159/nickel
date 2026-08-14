@@ -34,6 +34,7 @@ struct SectionSwitcher: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
+    @Environment(\.colorScheme) private var colorScheme
 
     /// Which mode the palette opened in — fixed by the entry point that
     /// opened it (⌘K vs. ⌃⌘M), not derived from the selection. See the type
@@ -58,7 +59,7 @@ struct SectionSwitcher: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                Color.black.opacity(0.15)
+                Color.overlayScrim(for: colorScheme)
                     .contentShape(Rectangle())
                     .onTapGesture { dismiss() }
                     // The palette takes over the panel while it's up, so

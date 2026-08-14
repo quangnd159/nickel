@@ -54,6 +54,20 @@ final class ComposerFocusTests: XCTestCase {
         panel.selectionModelForTesting.isComposerFocused
     }
 
+    private var isSearchFocused: Bool {
+        panel.selectionModelForTesting.isSearchFocused
+    }
+
+    /// A stand-in for the search field: registered with the panel the same
+    /// way `SearchField.updateNSView` registers the real one, since the
+    /// search field (unlike the composer) has no field-editor identity of
+    /// its own to be told apart by.
+    private func makeSearchField() -> NSTextField {
+        let field = makeOtherField()
+        panel.searchField = field
+        return field
+    }
+
     func testFocusingTheComposerSetsTheFlag() {
         let composer = makeComposerField()
 
@@ -129,5 +143,45 @@ final class ComposerFocusTests: XCTestCase {
         panel.becomeKey()
 
         XCTAssertFalse(isComposerFocused)
+    }
+
+    // MARK: - Search focus
+
+    /// The search capsule's substitute ring follows the same signal, one
+    /// field over — focusing the search field sets it, and it stays clear of
+    /// the composer's own flag.
+    func testFocusingTheSearchFieldSetsItsFlagAndNotTheComposers() {
+        let search = makeSearchField()
+
+        panel.makeKeyAndOrderFront(nil)
+        panel.becomeKey()
+        XCTAssertTrue(panel.makeFirstResponder(search))
+
+        XCTAssertTrue(isSearchFocused)
+        XCTAssertFalse(isComposerFocused)
+    }
+
+    func testFocusingTheComposerLeavesTheSearchFlagClear() {
+        let composer = makeComposerField()
+        let search = makeSearchField()
+        panel.makeKeyAndOrderFront(nil)
+        panel.becomeKey()
+        _ = panel.makeFirstResponder(search)
+
+        _ = panel.makeFirstResponder(composer)
+
+        XCTAssertFalse(isSearchFocused)
+        XCTAssertTrue(isComposerFocused)
+    }
+
+    func testLosingKeyClearsTheSearchFlag() {
+        let search = makeSearchField()
+        panel.makeKeyAndOrderFront(nil)
+        panel.becomeKey()
+        _ = panel.makeFirstResponder(search)
+
+        panel.resignKey()
+
+        XCTAssertFalse(isSearchFocused)
     }
 }

@@ -94,6 +94,21 @@ final class SelectionModel: ObservableObject {
         isComposerFocused = isFocused
     }
 
+    /// True while the search field's field editor holds first responder
+    /// *and* the panel is the key window — the same signal as
+    /// `isComposerFocused`, one field over. Drives the search capsule's
+    /// substitute focus ring, since `SearchField` suppresses AppKit's own
+    /// ring the same way `ComposerField` does.
+    ///
+    /// Owned here for the same reason as `isComposerFocused`: written only by
+    /// `FloatingPanel`, the one place that sees every way focus can be lost.
+    @Published private(set) var isSearchFocused = false
+
+    func setSearchFocused(_ isFocused: Bool) {
+        guard isSearchFocused != isFocused else { return }
+        isSearchFocused = isFocused
+    }
+
     /// Notes staged for the Logbook's "Delete Permanently" confirmation;
     /// `nil` when nothing is pending. Set by both the row context menu and
     /// ⌫ (which is handled in `FloatingPanel`, hence the shared state rather

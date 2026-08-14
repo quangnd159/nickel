@@ -45,6 +45,12 @@ struct SearchField: NSViewRepresentable {
             nsView.stringValue = text
         }
         context.coordinator.onEscape = onEscape
+        // Registers this field with `FloatingPanel` so its focus-sync can
+        // tell the search field's field editor apart from the composer's and
+        // every other field's — see `FloatingPanel.searchField`. Idempotent,
+        // so re-running it on every update is harmless; it just needs to run
+        // after the field has a window, which `makeNSView` can't guarantee.
+        (nsView.window as? FloatingPanel)?.searchField = nsView
     }
 
     func makeCoordinator() -> Coordinator {
