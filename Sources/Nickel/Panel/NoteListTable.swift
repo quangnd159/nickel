@@ -65,6 +65,13 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     private var scrollView: NSScrollView!
     private var tableView: NoteListTableView!
 
+    /// Measures rows that have no cell yet — see `offscreenMeasuredHeight`.
+    private lazy var measuringHost: RowHostingView<AnyView> = {
+        let host = RowHostingView(rootView: AnyView(EmptyView()))
+        host.sizingOptions = [.intrinsicContentSize]
+        return host
+    }()
+
     /// True while the coordinator is itself changing the table's selection or
     /// its rows. `tableViewSelectionDidChange` fires for those too, and writing
     /// them back would (among other things) drop selected notes that a search
@@ -106,7 +113,9 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         table.headerView = nil
         table.backgroundColor = .clear
         table.style = .fullWidth
-        table.usesAutomaticRowHeights = true
+        // Heights come from `tableView(_:heightOfRow:)`, not
+        // `usesAutomaticRowHeights` — see `height(ofRow:)`.
+        table.usesAutomaticRowHeights = false
         table.rowSizeStyle = .custom
         table.intercellSpacing = NSSize(width: 0, height: mode.rowSpacing)
         table.allowsMultipleSelection = true
@@ -186,6 +195,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         // refreshed here — and the row's height, which the cell reports back
         // once its content has actually settled at its new size.
         noteHeightAnimationIntent()
+        invalidateChangedRowHeights()
         refreshExistingCells()
         syncSelectionToTable()
         isSyncingSelection = false
@@ -232,21 +242,126 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
     // MARK: Row heights
 
-    /// A cell's SwiftUI content has settled at a new ideal height — the row
-    /// grew into an inline editor, a note was expanded, its text changed.
-    /// `usesAutomaticRowHeights` measures a row once and caches it, so the
-    /// table has to be told; and this is the only moment it can be told
-    /// correctly, since the content changes on SwiftUI's own render tick,
-    /// after whatever state change prompted it reached the table.
-    func rowHeightDidChange(in cell: NoteListCellView) {
+    /// Every row's height, keyed by the row itself. `NSTableView` asks for
+    /// heights while it tiles — including for rows that have no cell yet — so
+    /// this has to be a plain lookup that never lays anything out.
+    ///
+    /// `usesAutomaticRowHeights` was the obvious fit and doesn't work here:
+    /// with SwiftUI-hosted cells it settles on the height it first measured
+    /// and `noteHeightOfRows` doesn't move it (verified with `UIProbe` — every
+    /// row stayed at one line's height while the cells' own fitting sizes were
+    /// correct). `tableView(_:heightOfRow:)` has the documented counterpart:
+    /// "If the delegate implements `tableView(_:heightOfRow:)` this method
+    /// immediately retiles the table view using the row heights the delegate
+    /// provides."
+    private var rowHeights: [NoteListRow: CGFloat] = [:]
+
+    /// Rows whose cached height is known to be out of date.
+    private var staleHeightRows: Set<NoteListRow> = []
+
+    /// Last seen note values, for spotting the ones that changed.
+    private var lastNotesByID: [UUID: Note] = [:]
+
+    /// Used before the table has a width to measure against; replaced as soon
+    /// as a real measurement is possible.
+    private static let provisionalRowHeight: CGFloat = 45
+
+    /// A pure lookup. `NSTableView` asks for heights from inside its own
+    /// layout pass, so measuring here — which lays SwiftUI content out —
+    /// re-enters Auto Layout and trips its "still needs constraint update"
+    /// assertion. Rows with no height yet get a provisional one and are
+    /// measured on the next runloop turn instead.
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        guard rows.indices.contains(row) else { return Self.provisionalRowHeight }
+        guard let cached = rowHeights[rows[row]] else {
+            scheduleHeightFlush()
+            return Self.provisionalRowHeight
+        }
+        return cached
+    }
+
+    /// Measures every row that has no height yet or whose note changed while
+    /// it had no cell to report for itself. Runs from the deferred flush,
+    /// never inside a layout pass. Returns the rows whose height moved.
+    private func measureOutstandingRowHeights() -> IndexSet {
+        let width = tableView.bounds.width
+        guard width > 0 else { return IndexSet() }
+        var changed = IndexSet()
+        var usedMeasuringHost = false
+
+        for (index, item) in rows.enumerated() {
+            guard rowHeights[item] == nil || staleHeightRows.contains(item) else { continue }
+
+            let measured: CGFloat
+            if let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? NoteListCellView,
+               cell.contentIdealHeight > 0 {
+                // A row on screen already knows its own height.
+                measured = cell.contentIdealHeight
+            } else {
+                measuringHost.rootView = AnyView(
+                    content(for: item, at: index).frame(width: width, alignment: .leading)
+                )
+                measuringHost.setFrameSize(NSSize(width: width, height: 0))
+                measuringHost.layoutSubtreeIfNeeded()
+                measured = max(measuringHost.idealHeight, 1)
+                usedMeasuringHost = true
+            }
+
+            if rowHeights[item] != measured { changed.insert(index) }
+            rowHeights[item] = measured
+        }
+        staleHeightRows.removeAll()
+
+        // Leaves nothing hosted: the measuring view builds a real copy of a
+        // row's content, and for the row being edited that would include a
+        // second editor. It's never in a window — `InlineNoteEditorField`
+        // claims first responder through `view.window` — so it can't steal
+        // focus, but there's no reason to keep it alive either.
+        if usedMeasuringHost {
+            measuringHost.rootView = AnyView(EmptyView())
+        }
+        return changed
+    }
+
+    /// A note's text can change while its row is scrolled out of sight, where
+    /// there's no cell to notice. Marking it re-measures it on the next flush,
+    /// keeping the old height until the new one is known rather than flashing
+    /// through a placeholder. Also drops heights for rows that are gone.
+    private func invalidateChangedRowHeights() {
+        var current: [UUID: Note] = [:]
+        current.reserveCapacity(store.notes.count)
+        for note in store.notes {
+            current[note.id] = note
+            if lastNotesByID[note.id] != note {
+                staleHeightRows.insert(.note(note.id))
+            }
+        }
+        lastNotesByID = current
+
+        let live = Set(rows)
+        rowHeights = rowHeights.filter { live.contains($0.key) }
+        if !staleHeightRows.isEmpty { scheduleHeightFlush() }
+    }
+
+    /// A cell's SwiftUI content has settled at a new height — the row grew
+    /// into an inline editor, a note was expanded, its text changed. The
+    /// content changes on SwiftUI's own render tick, after the state change
+    /// that prompted it reached the table, so this is the moment the row's
+    /// height is known.
+    func rowHeight(_ height: CGFloat, didSettleIn cell: NoteListCellView) {
+        let row = tableView.row(for: cell)
+        guard rows.indices.contains(row), height > 0 else { return }
+        guard rowHeights[rows[row]] != height else { return }
+        rowHeights[rows[row]] = height
         pendingHeightCells.add(cell)
         scheduleHeightFlush()
     }
 
-    /// The panel was resized: every row rewraps its text, so every cached
-    /// height is stale.
+    /// The panel was resized: every row rewraps its text, so every height is
+    /// stale.
     func invalidateAllRowHeights() {
         guard !rows.isEmpty else { return }
+        rowHeights.removeAll()
         pendingAllRowHeights = true
         scheduleHeightFlush()
     }
@@ -261,7 +376,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
     private func flushPendingRowHeights() {
         isHeightFlushScheduled = false
-        var indexes = IndexSet()
+        var indexes = measureOutstandingRowHeights()
         if pendingAllRowHeights, !rows.isEmpty {
             indexes.insert(integersIn: 0..<rows.count)
         }
@@ -425,9 +540,9 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let cell = NoteListCellView()
-        cell.onIdealHeightChange = { [weak self, weak cell] in
+        cell.onIdealHeightChange = { [weak self, weak cell] height in
             guard let self, let cell else { return }
-            self.rowHeightDidChange(in: cell)
+            self.rowHeight(height, didSettleIn: cell)
         }
         cell.configure(
             content: content(for: rows[row], at: row),
@@ -614,10 +729,23 @@ final class NoteListCellView: NSTableCellView {
     private var configuredRow: NoteListRow?
     private var configuredIndex: Int?
 
-    var onIdealHeightChange: (() -> Void)? {
+    /// The content as the coordinator built it, before the width is pinned on
+    /// (see `applyContent`), so a resize can re-pin without rebuilding it.
+    private var baseContent: AnyView = AnyView(EmptyView())
+    private var contentWidth: CGFloat = 0
+    private var isContentApplyScheduled = false
+
+    var onIdealHeightChange: ((CGFloat) -> Void)? {
         get { host.onIdealHeightChange }
         set { host.onIdealHeightChange = newValue }
     }
+
+    /// Whether this cell's content currently takes clicks. Read by `UIProbe`.
+    var isContentInteractive: Bool { host.isInteractive }
+
+    /// The height this cell's content wants at its current width. Read by
+    /// `UIProbe`.
+    var contentIdealHeight: CGFloat { host.idealHeight }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -645,11 +773,45 @@ final class NoteListCellView: NSTableCellView {
         guard configuredRow != row || configuredIndex != index else { return }
         configuredRow = row
         configuredIndex = index
-        host.rootView = AnyView(
+        baseContent = AnyView(
             content.onPreferenceChange(NoteAttachmentFramesKey.self) { [weak self] frames in
                 self?.attachmentFrames = frames
             }
         )
+        applyContent()
+    }
+
+    /// Deferred, not applied in place: re-hosting the content invalidates
+    /// SwiftUI's layout, and doing that from inside AppKit's own layout pass
+    /// re-enters it.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        guard newSize.width > 0, newSize.width != contentWidth else { return }
+        contentWidth = newSize.width
+        guard !isContentApplyScheduled else { return }
+        isContentApplyScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.isContentApplyScheduled = false
+            self.applyContent()
+        }
+    }
+
+    /// Hosts the content at the cell's exact width.
+    ///
+    /// The width has to be pinned in SwiftUI, not just constrained in AppKit:
+    /// `NSHostingView`'s `sizingOptions` reflect the content's *ideal* size,
+    /// and a `Text`'s ideal size is its unwrapped single line. Hosting a
+    /// wrapping note without a fixed width therefore reports one line's height
+    /// no matter how long the note is — which is exactly what the table then
+    /// used as the row height. Fixing the width makes the ideal height the
+    /// wrapped height.
+    private func applyContent() {
+        guard contentWidth > 0 else {
+            host.rootView = baseContent
+            return
+        }
+        host.rootView = AnyView(baseContent.frame(width: contentWidth, alignment: .leading))
         host.contentDidChange()
     }
 }
@@ -670,11 +832,14 @@ final class RowHostingView<Content: View>: NSHostingView<Content> {
     var isInteractive = false
 
     /// Called on the next runloop turn — after SwiftUI has applied the change
-    /// that prompted it — whenever the content's ideal height moves.
-    var onIdealHeightChange: (() -> Void)?
+    /// that prompted it — whenever the content's height moves.
+    var onIdealHeightChange: ((CGFloat) -> Void)?
 
     private var lastIdealHeight: CGFloat?
     private var isHeightCheckScheduled = false
+
+    /// The height the content wants right now.
+    var idealHeight: CGFloat { intrinsicContentSize.height }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         isInteractive ? super.hitTest(point) : nil
@@ -706,10 +871,10 @@ final class RowHostingView<Content: View>: NSHostingView<Content> {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.isHeightCheckScheduled = false
-            let height = self.intrinsicContentSize.height
+            let height = self.idealHeight
             guard height > 0, height != self.lastIdealHeight else { return }
             self.lastIdealHeight = height
-            self.onIdealHeightChange?()
+            self.onIdealHeightChange?(height)
         }
     }
 }
