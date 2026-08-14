@@ -643,19 +643,20 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             "viewFor(rowCount) should return nil, not trap"
         )
 
-        // Coordinate-space agreement: a row's rect and its cell's frame
-        // should share an x-origin. `pointInRow` assumes they do; this only
-        // measures, per the plan — a real delta is a separate fix.
+        // Coordinate-space agreement: the probe originally measured a 6pt
+        // x-origin delta between a row's rect and its cell's frame (the
+        // `.fullWidth` style's inset), which is why `pointInRow` derives the
+        // click point from `frameOfCell`, not `rect(ofRow:)`. Pin that the
+        // delta is still the inset the fix compensates for — if the table
+        // style ever changes it, this surfaces the drift.
         if rowCount > 0 {
             let rowRect = table.rect(ofRow: 0)
             let cellFrame = table.frameOfCell(atColumn: 0, row: 0)
-            let delta = abs(rowRect.minX - cellFrame.minX)
-            print("  row rect minX=\(rowRect.minX), cell frame minX=\(cellFrame.minX), delta=\(delta)")
-            if delta < 0.5 {
-                check(true, "row rect and cell frame share an x-origin (delta \(delta))")
-            } else {
-                print("  MEASURED (not asserted per plan): x-origin delta is \(delta), exceeds 0.5pt")
-            }
+            let delta = cellFrame.minX - rowRect.minX
+            check(
+                delta >= 0 && cellFrame.width <= rowRect.width,
+                "cell frame sits inside its row rect (x-inset \(delta)); pointInRow uses the cell frame"
+            )
         }
     }
 

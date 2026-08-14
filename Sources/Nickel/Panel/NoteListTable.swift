@@ -972,10 +972,16 @@ final class NoteListTableView: NSTableView {
         if widthChanged { coordinator?.invalidateAllRowHeights() }
     }
 
+    /// The click's position in the CELL's coordinate space, not the row's:
+    /// the `.fullWidth` table style insets cells 6pt inside the row (and the
+    /// intercell gap splits above/below), and both consumers of this point —
+    /// the checkbox column (`NoteRowMetrics.checkboxColumnWidth`) and
+    /// `attachmentFrames` — are expressed in cell coordinates. Measured by
+    /// the probe's delegate-guards check: row-rect-based math was 6pt off.
     private func pointInRow(_ event: NSEvent, row: Int) -> NSPoint {
         let pointInTable = convert(event.locationInWindow, from: nil)
-        let rowRect = rect(ofRow: row)
-        return NSPoint(x: pointInTable.x - rowRect.minX, y: pointInTable.y - rowRect.minY)
+        let cellFrame = frameOfCell(atColumn: 0, row: row)
+        return NSPoint(x: pointInTable.x - cellFrame.minX, y: pointInTable.y - cellFrame.minY)
     }
 
     override func mouseDown(with event: NSEvent) {
