@@ -22,6 +22,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
             button.target = self
             button.action = #selector(statusItemClicked(_:))
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
+            button.toolTip = "Nickel"
+            button.setAccessibilityLabel("Nickel")
         }
         // Intentionally not `item.menu = ...`: setting `menu` directly makes
         // *every* click (left or right) show the menu instead of reaching

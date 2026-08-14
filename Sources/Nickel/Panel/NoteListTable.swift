@@ -208,7 +208,6 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
 
         self.scrollView = scrollView

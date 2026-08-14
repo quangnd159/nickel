@@ -21,13 +21,16 @@ struct SectionHeader: View {
             if isRenaming {
                 renameField
             } else {
-                Text(name.uppercased())
+                Text(name)
+                    .textCase(.uppercase)
                     .font(.system(size: 11, weight: .semibold))
                     .tracking(0.8)
                     .foregroundStyle(.secondary)
                     .fixedSize()
                     .contentShape(Rectangle())
                     .onTapGesture(count: 2) { selection.beginRenamingSection(name) }
+                    .accessibilityLabel(name)
+                    .accessibilityAddTraits(.isHeader)
             }
 
             Rectangle()
