@@ -62,7 +62,16 @@ struct ComposerDropTarget: NSViewRepresentable {
         // Drags only; clicks fall through to the card's real content.
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+        /// A drag of the panel's own notes (it carries `.nickelNoteID`) is a
+        /// move within the list, never composer input — accepting its `.string`
+        /// here would let a drag that overshoots the last row silently dump a
+        /// note's text into the composer.
+        private func isNoteDrag(_ sender: NSDraggingInfo) -> Bool {
+            sender.draggingPasteboard.types?.contains(.nickelNoteID) == true
+        }
+
         override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            guard !isNoteDrag(sender) else { return [] }
             onTargeted?(true)
             return .copy
         }
@@ -76,6 +85,7 @@ struct ComposerDropTarget: NSViewRepresentable {
         }
 
         override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            guard !isNoteDrag(sender) else { return false }
             let pasteboard = sender.draggingPasteboard
 
             if let urls = pasteboard.readObjects(
