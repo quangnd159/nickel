@@ -522,10 +522,13 @@ final class NoteListTableView: NSTableView {
 final class NoteListRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override func drawBackground(in dirtyRect: NSRect) {}
-    override var isEmphasized: Bool {
-        get { true }
-        set {}
-    }
+
+    /// A selected row normally reports `.emphasized` here, which tells the
+    /// cell's content to draw for a filled accent highlight — SwiftUI hosted
+    /// in the cell responds by flipping `.primary` text to white, invisible
+    /// on the card's white fill. This row never draws that highlight, so its
+    /// content must always draw as normal.
+    override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
 }
 
 /// Catches clicks that land in the scroll view but below the last row — the
