@@ -29,6 +29,14 @@ cp ".build/release/Nickel" "$APP_BUNDLE/Contents/MacOS/Nickel"
 cp "Resources/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp "Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
 
+# Stamp CFBundleVersion with a monotonic build number so Launch Services and
+# crash reports can tell builds of the same CFBundleShortVersionString apart
+# (the update checker also uses build identity for its own diagnostics).
+# Only the copy inside the bundle is touched — the source Info.plist keeps
+# CFBundleVersion at "1" and is never hand-edited on release.
+BUILD_NUMBER="$(git rev-list --count HEAD)"
+plutil -replace CFBundleVersion -string "$BUILD_NUMBER" "$APP_BUNDLE/Contents/Info.plist"
+
 IDENTITY="-"
 if security find-identity -p codesigning -v 2>/dev/null | grep -q "Nickel Dev Signing"; then
   IDENTITY="Nickel Dev Signing"

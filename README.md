@@ -39,7 +39,9 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
   anywhere to show or hide the floating panel.
 - **Floating panel**: a borderless, always-on-top scratchpad panel with search,
   a note composer, checkable notes, multi-select, inline editing, expand/
-  collapse for long notes, and drag-free custom lists ("Move to…").
+  collapse for long notes, and drag-and-drop reordering — drag within a
+  section to reorder, or across sections in Show All to move. "Move to
+  Section" is also available via right-click or ⌃⌘M.
 - **Sections**: named groups managed straight from their header — rename,
   reorder (Move Up/Down), clear done notes in just that section, dissolve
   (ungroup, keeping the notes), or delete outright (choosing to move its
@@ -53,6 +55,11 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 - **Panel overflow menu**: section switching, Clear Done, Open Logbook, Copy
   All as List, Reveal Notes in Finder, Keyboard Shortcuts, a Keep on Top
   toggle, Close, Settings…, and Quit.
+- **Customizable hotkeys**: pick a different key for capture and for the
+  panel toggle in Settings — double-tap the chosen key from anywhere, same
+  as the defaults.
+- **Mark notes as done when copied**: an optional Settings toggle that checks
+  a note off automatically the moment you copy it.
 - **Frame persistence**: the panel remembers where you left it (position and
   size) across relaunches, and clamps back onscreen if a display is
   disconnected.
@@ -75,7 +82,8 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | -------- | ---------------------------------------------------------- |
 | **Left ⇧⇧**  | Capture the current selection                          |
 | **Right ⇧⇧** | Toggle the floating panel                               |
-| **⌘K**   | Commands, or move to section                                 |
+| **⌘K**   | Commands, or switch section                                  |
+| **⌃⌘M**  | Move the selected note(s) to a section                       |
 | **⇧⌘]**  | Next section                                                 |
 | **⇧⌘[**  | Previous section                                             |
 | **⇧⌘R**  | Rename the focused section                                   |
@@ -87,12 +95,14 @@ Notes are stored in a local JSON file: no accounts, no sync, no cloud.
 | **Space**| Toggle done / not-done on the selection                     |
 | **⌘E**   | Expand/collapse the selected note(s)                        |
 | **Return**| Edit the selected note (single selection only)              |
+| **⌘Return**| Edit the selected note in a new window                     |
 | **⇧⌘M**  | Merge the selected notes into one                            |
 | **⌫**    | Delete the selected note(s)                                 |
 | **⌥⌫**   | Move the selected note(s) to the Logbook                     |
 | **Esc**  | Clear selection, cancel an edit, or dismiss the panel        |
 | **⌘W**   | Close the panel                                              |
 | **⌘,**   | Open Settings                                                |
+| **⌘/**   | Show this keyboard shortcuts card                            |
 
 Arrow keys move the selection; hold ⇧ to extend a range.
 
