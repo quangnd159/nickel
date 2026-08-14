@@ -399,4 +399,51 @@ final class SelectionModelTests: XCTestCase {
         XCTAssertTrue(selection.selectedIDs.isEmpty)
         XCTAssertTrue(selection.isShowingLogbook)
     }
+
+    // MARK: - Active section changes clear the selection
+
+    /// A selection is scoped to whatever's on screen; switching the active
+    /// section (however it happens — ⇧⌘]/⇧⌘[, the ⋯ menu, a ⌘K switch, "Show
+    /// All") must drop a selection that no longer belongs to the visible
+    /// list. Covers `store.setActiveSection` directly, the entry point every
+    /// other section switch funnels through (see `NoteStore.cycleActiveSection`).
+    func testSettingActiveSectionClearsTheSelection() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        selection.selectAllNotes()
+        XCTAssertFalse(selection.selectedIDs.isEmpty)
+
+        store.setActiveSection("Work")
+
+        XCTAssertTrue(selection.selectedIDs.isEmpty)
+    }
+
+    /// `cycleActiveSection` (⇧⌘]/⇧⌘[, the View menu's Next/Previous Section)
+    /// is implemented in terms of `setActiveSection`, so it must clear the
+    /// selection the same way.
+    func testCyclingActiveSectionClearsTheSelection() {
+        store.createSection(named: "Work")
+        store.add(text: "a", sourceApp: nil)
+        selection.selectAllNotes()
+        XCTAssertFalse(selection.selectedIDs.isEmpty)
+
+        store.cycleActiveSection(direction: 1)
+
+        XCTAssertTrue(selection.selectedIDs.isEmpty)
+    }
+
+    /// Re-selecting the section that's already active is a no-op for
+    /// `NoteStore` in the sense that nothing else changes, but `activeSection`
+    /// still republishes — selection still clears, which is harmless (there's
+    /// nothing left to preserve a selection *for* once the palette or menu
+    /// interaction that triggered it has committed).
+    func testSettingActiveSectionToItsCurrentValueStillClearsSelection() {
+        store.add(text: "a", sourceApp: nil)
+        selection.selectAllNotes()
+        XCTAssertFalse(selection.selectedIDs.isEmpty)
+
+        store.setActiveSection(nil) // already nil (Show All)
+
+        XCTAssertTrue(selection.selectedIDs.isEmpty)
+    }
 }

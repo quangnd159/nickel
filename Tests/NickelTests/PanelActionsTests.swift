@@ -386,6 +386,28 @@ final class PanelActionsTests: XCTestCase {
         XCTAssertTrue(store.archivedNotes.isEmpty)
     }
 
+    // MARK: - move to list
+
+    func testMoveToSectionMovesNotesAndClearsSelection() {
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        selection.selectAllNotes()
+
+        actions.move(toSection: "Work")
+
+        XCTAssertTrue(store.notes.allSatisfy { $0.listName == "Work" })
+        XCTAssertTrue(selection.selectedIDs.isEmpty, "the moved-into-view/out-of-view selection shouldn't linger and risk a second accidental move")
+    }
+
+    func testMoveToSectionWithEmptySelectionIsNoOp() {
+        store.add(text: "a", sourceApp: nil)
+
+        actions.move(toSection: "Work")
+
+        XCTAssertNil(store.notes[0].listName)
+        XCTAssertTrue(store.sections.isEmpty)
+    }
+
     // MARK: - Section commands
 
     func testRequestDeleteSectionDeletesAnEmptySectionWithoutAsking() {

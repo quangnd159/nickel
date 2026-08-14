@@ -1,6 +1,6 @@
 import AppKit
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem?
     private var panel: FloatingPanel?
     private var trustPollTimer: Timer?
@@ -240,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         mainMenu.addItem(editMenuItem)
 
         // A "View" menu for section navigation: each item first shows the
-        // panel if it's hidden, so ⌘K/⇧⌘]/⇧⌘[/⌘/ work from the menu even
+        // panel if it's hidden, so ⌘K/⌃⌘M/⇧⌘]/⇧⌘[/⌘/ work from the menu even
         // before the panel has ever been summoned. While the panel is key,
         // its own `performKeyEquivalent` intercepts these key equivalents
         // ahead of the menu, so there's no double-handling.
@@ -254,6 +254,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         switchSectionItem.target = self
         viewMenu.addItem(switchSectionItem)
+
+        let moveToSectionItem = NSMenuItem(
+            title: "Move to Section…",
+            action: #selector(moveToSection),
+            keyEquivalent: "m"
+        )
+        moveToSectionItem.keyEquivalentModifierMask = [.control, .command]
+        moveToSectionItem.target = self
+        viewMenu.addItem(moveToSectionItem)
 
         viewMenu.addItem(.separator())
 
@@ -340,6 +349,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
     }
 
+    @objc private func moveToSection() {
+        showPanelIfHidden()
+        NotificationCenter.default.post(name: .nickelToggleMoveToSection, object: nil)
+    }
+
     @objc private func nextSection() {
         showPanelIfHidden()
         noteStore.cycleActiveSection(direction: 1)
@@ -357,6 +371,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showHelp() {
         NSWorkspace.shared.open(URL(string: "https://github.com/quangnd159/nickel")!)
+    }
+
+    /// Disables "Move to Section…" when there's nothing to move (matches
+    /// `PanelView.toggleMoveToSection`'s own no-op guard); every other menu
+    /// item stays enabled, so this returns `true` for anything else.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(moveToSection) else { return true }
+        guard let selection = panel?.currentSelectionModel else { return false }
+        return !selection.isShowingLogbook && !selection.selectedIDs.isEmpty
     }
 
     /// The status item's right-click menu: a compact mirror of the app menu

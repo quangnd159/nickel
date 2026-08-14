@@ -2,15 +2,13 @@ import Combine
 import Foundation
 import SwiftUI
 
-/// A panel-wide modal overlay: the ⌘K section palette or the ⌘/ keyboard
-/// shortcuts card. At most one is presented at a time.
+/// A panel-wide modal overlay: the section palette (switch or move mode) or
+/// the ⌘/ keyboard shortcuts card. At most one is presented at a time.
 ///
-/// `sectionSwitcher`'s `move` flag is snapshotted once, at presentation time
-/// (see `PanelView`'s `.nickelToggleSectionSwitcher` handler), rather than
-/// derived live from `selectedIDs` while the palette is open: the palette's
-/// own commit handling can clear/leave the selection mid-interaction, and a
-/// live read would risk the palette silently flipping mode out from under
-/// the user while it's open.
+/// `sectionSwitcher`'s `move` flag is fixed by which entry point opened the
+/// palette — ⌘K always opens switch mode, ⌃⌘M ("Move to Section…") always
+/// opens move mode — rather than derived from `selectedIDs`: see
+/// `PanelView.toggleSectionSwitcher`/`toggleMoveToSection`.
 enum PanelOverlay: Equatable {
     case sectionSwitcher(move: Bool)
     case shortcuts
@@ -171,6 +169,19 @@ final class SelectionModel: ObservableObject {
                 // would act on something the user can't see.
                 let inScope = notes.filter { ($0.archivedAt != nil) == self.isShowingLogbook }
                 self.pruneToExisting(ids: Set(inScope.map(\.id)))
+            }
+            .store(in: &cancellables)
+
+        // A selection is scoped to whatever section is on screen; carrying it
+        // across a section change (⇧⌘]/⇧⌘[, the ⋯ menu, a ⌘K switch, "Show
+        // All") would leave notes selected that have scrolled out of view or
+        // aren't even the section being looked at. Routed through this one
+        // subscription — rather than a `clear()` call at every call site
+        // that can change `activeSection` — so it can never be missed.
+        store.$activeSection
+            .dropFirst()
+            .sink { [weak self] _ in
+                self?.clear()
             }
             .store(in: &cancellables)
     }
