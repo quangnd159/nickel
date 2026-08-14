@@ -11,10 +11,10 @@ Execute in the order below unless dependencies say otherwise.
 
 | Plan | Title | Priority | Effort | Depends on | Status |
 |------|-------|----------|--------|------------|--------|
-| 026 | Bounds-guard table callbacks | P1 | S | — | TODO |
-| 029 | Empty state/⌘/ reflect configured hotkeys | P1 | S | — | TODO |
-| 030 | Merge in visible order | P1 | S | — | TODO |
-| 041 | Ship metadata (plist, README, probe in CI) | P1 | S | 029 (soft) | TODO |
+| 026 | Bounds-guard table callbacks | P1 | S | — | DONE (merged 2026-08-14; follow-up: pointInRow switched to cell-frame basis after the probe measured the 6pt inset) |
+| 029 | Empty state/⌘/ reflect configured hotkeys | P1 | S | — | DONE (merged 2026-08-14) |
+| 030 | Merge in visible order | P1 | S | — | DONE (merged 2026-08-14) |
+| 041 | Ship metadata (plist, README, probe in CI) | P1 | S | 029 (soft) | DONE (merged 2026-08-14; CI probe step uses timeout-minutes — runner lacks GNU timeout; first CI run still owed) |
 | 031 | Composer/inline smart-substitution off | P1 | S | — | TODO |
 | 033 | Accessibility revocation recovery | P1 | S | — | TODO |
 | 035 | Cheap list perf (re-host key, id index) | P1 | S | — | TODO |
