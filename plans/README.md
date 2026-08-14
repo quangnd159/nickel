@@ -2,7 +2,55 @@
 
 Round 1 (plans 001–014) generated 2026-08-02 against commit `3343e77`; all
 merged. Round 2 (plans 015–025) generated 2026-08-02 against commit
-`83d0b46`. Execute in the order below unless dependencies say otherwise.
+`83d0b46`; all merged. Round 3 (plans 026–041) generated 2026-08-14 against
+commit `62bbcb6` — pre-ship audit after the NSTableView list refactor, the
+drag-and-drop feature, the ⌘K/⌃⌘M split, and the done-on-copy setting.
+Execute in the order below unless dependencies say otherwise.
+
+## Round 3 — execution order & status
+
+| Plan | Title | Priority | Effort | Depends on | Status |
+|------|-------|----------|--------|------------|--------|
+| 026 | Bounds-guard table callbacks | P1 | S | — | TODO |
+| 029 | Empty state/⌘/ reflect configured hotkeys | P1 | S | — | TODO |
+| 030 | Merge in visible order | P1 | S | — | TODO |
+| 041 | Ship metadata (plist, README, probe in CI) | P1 | S | 029 (soft) | TODO |
+| 031 | Composer/inline smart-substitution off | P1 | S | — | TODO |
+| 033 | Accessibility revocation recovery | P1 | S | — | TODO |
+| 035 | Cheap list perf (re-host key, id index) | P1 | S | — | TODO |
+| 032 | Modern activation + stale comments | P1 | S | — | TODO |
+| 027 | Edit-menu note actions | P1 | S | — | TODO |
+| 028 | Panel min size + stale-not-wipe widths | P1 | S | — | TODO |
+| 034 | Inert measurement content | P2 | M | — | TODO |
+| 037 | VoiceOver essentials + scroller pref | P1 | S | — | TODO |
+| 036 | Pipeline short-circuit + resize coalescing | P2 | M | 028, 035 | TODO |
+| 038 | Visual polish (scrim, ⌘/ scroll, focus ring, motion, casing) | P2 | M | 029 (soft) | TODO |
+| 039 | Menu/shortcut single source + File menu | P2 | M | 027, 029, 032 | TODO |
+| 040 | Palette + context-menu tests | P2 | M | 039 (soft) | TODO |
+
+Round 3 file-conflict notes: 026/027/028/034/035/036 all touch
+`NoteListTable.swift`; 027/031/032/033/039 touch `FloatingPanel.swift` or
+`AppDelegate.swift`. The order above is safe sequentially; parallel
+execution is safe within these disjoint groups: {026, 029, 030, 041},
+{031, 033, 035}, {032}, {027, 028 sequential}, {034, 037}, {036, 038},
+{039 → 040}.
+
+Round 3 — considered, deferred or rejected:
+
+- **PanelView.swift / NoteListTable.swift file splits** (both ~1,225
+  lines): real debt, MED risk; wrong moment right before shipping.
+  Re-raise after ship.
+- **NSSearchField swap for the search capsule**: MED risk vs cosmetic
+  gain; plan 038 adds the missing focus ring instead. Revisit if recent-
+  searches/clear-button demand appears.
+- **`filteredNotes` cross-turn memoization**: staleness risk documented in
+  code; only with profiler evidence.
+- **Multi-drag stack formation/count badge**: NSTableView may already
+  flock; needs a manual look before planning (MED confidence finding).
+- **Drag-image landing frame vs `.gap`**: shipped behavior verified by
+  eye; no action.
+- **Shared-field-editor undo crosstalk between fields** (audit side note):
+  standard AppKit behavior; manual check only.
 Each executor: read the plan fully before starting, honor its STOP
 conditions, and update your row when done.
 
