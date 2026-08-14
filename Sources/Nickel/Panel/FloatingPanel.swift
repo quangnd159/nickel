@@ -449,11 +449,11 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
         if let command = WindowShortcuts.command(for: event) {
             switch command {
             case .sectionSwitcher:
-                NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
+                selectionModel.toggleSectionSwitcher()
             case .moveToSection:
-                NotificationCenter.default.post(name: .nickelToggleMoveToSection, object: nil)
+                selectionModel.toggleMoveToSection()
             case .shortcutsCard:
-                NotificationCenter.default.post(name: .nickelToggleShortcuts, object: nil)
+                selectionModel.toggleOverlay(.shortcuts)
             case .findFocus:
                 NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
             case .newNote:

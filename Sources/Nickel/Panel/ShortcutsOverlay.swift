@@ -1,12 +1,5 @@
 import SwiftUI
 
-/// Posted by `FloatingPanel` when ⌘/ is pressed, toggling the keyboard
-/// shortcuts card's presentation. Mirrors `.nickelToggleSectionSwitcher` in
-/// `SectionSwitcher.swift`.
-extension Notification.Name {
-    static let nickelToggleShortcuts = Notification.Name("NickelToggleShortcuts")
-}
-
 /// A reference card of the panel's keyboard shortcuts, opened via ⌘/ (and
 /// listed in the ⋯ menu). Purely informational — nothing on it is
 /// interactive beyond dismissing it — so unlike `SectionSwitcher` it needs no

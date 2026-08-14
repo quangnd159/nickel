@@ -1,5 +1,15 @@
 import AppKit
 
+/// The five menu items shared by the app menu and the status-item menu —
+/// see `AppDelegate.appMenuCoreItems()`.
+private struct AppMenuCoreItems {
+    let about: NSMenuItem
+    let checkForUpdates: NSMenuItem
+    let revealInFinder: NSMenuItem
+    let settings: NSMenuItem
+    let quit: NSMenuItem
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private var statusItem: NSStatusItem?
     private var panel: FloatingPanel?
@@ -172,34 +182,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
+        let coreItems = appMenuCoreItems()
 
-        let aboutItem = NSMenuItem(title: "About Nickel", action: #selector(showAbout), keyEquivalent: "")
-        aboutItem.target = self
-        appMenu.addItem(aboutItem)
-
-        let updateItem = NSMenuItem(
-            title: "Check for Updates…",
-            action: #selector(checkForUpdates),
-            keyEquivalent: ""
-        )
-        updateItem.target = self
-        appMenu.addItem(updateItem)
+        appMenu.addItem(coreItems.about)
+        appMenu.addItem(coreItems.checkForUpdates)
 
         appMenu.addItem(.separator())
 
-        let revealItem = NSMenuItem(
-            title: "Reveal Notes in Finder",
-            action: #selector(revealNotesInFinder),
-            keyEquivalent: ""
-        )
-        revealItem.target = self
-        appMenu.addItem(revealItem)
+        appMenu.addItem(coreItems.revealInFinder)
 
         appMenu.addItem(.separator())
 
-        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
-        settingsItem.target = self
-        appMenu.addItem(settingsItem)
+        appMenu.addItem(coreItems.settings)
 
         appMenu.addItem(.separator())
 
@@ -236,9 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         appMenu.addItem(.separator())
 
-        appMenu.addItem(
-            NSMenuItem(title: "Quit Nickel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        )
+        appMenu.addItem(coreItems.quit)
 
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
@@ -403,12 +395,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func switchSection() {
         showPanelIfHidden()
-        NotificationCenter.default.post(name: .nickelToggleSectionSwitcher, object: nil)
+        panel?.currentSelectionModel.toggleSectionSwitcher()
     }
 
     @objc private func moveToSection() {
         showPanelIfHidden()
-        NotificationCenter.default.post(name: .nickelToggleMoveToSection, object: nil)
+        panel?.currentSelectionModel.toggleMoveToSection()
     }
 
     @objc private func nextSection() {
@@ -423,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
     @objc private func showKeyboardShortcuts() {
         showPanelIfHidden()
-        NotificationCenter.default.post(name: .nickelToggleShortcuts, object: nil)
+        panel?.currentSelectionModel.toggleOverlay(.shortcuts)
     }
 
     @objc private func showHelp() {
@@ -431,8 +423,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     }
 
     /// Disables "Move to Section…" when there's nothing to move (matches
-    /// `PanelView.toggleMoveToSection`'s own no-op guard); every other menu
-    /// item stays enabled, so this returns `true` for anything else.
+    /// `SelectionModel.toggleMoveToSection`'s own no-op guard); every other
+    /// menu item stays enabled, so this returns `true` for anything else.
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         guard menuItem.action == #selector(moveToSection) else { return true }
         guard let selection = panel?.currentSelectionModel else { return false }
@@ -444,40 +436,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     /// shows while Nickel is the active app).
     private func makeMenu() -> NSMenu {
         let menu = NSMenu()
+        let coreItems = appMenuCoreItems()
 
-        let aboutItem = NSMenuItem(
-            title: "About Nickel",
-            action: #selector(showAbout),
-            keyEquivalent: ""
-        )
-        aboutItem.target = self
-        menu.addItem(aboutItem)
-
-        let updateItem = NSMenuItem(
-            title: "Check for Updates…",
-            action: #selector(checkForUpdates),
-            keyEquivalent: ""
-        )
-        updateItem.target = self
-        menu.addItem(updateItem)
+        menu.addItem(coreItems.about)
+        menu.addItem(coreItems.checkForUpdates)
 
         menu.addItem(.separator())
 
-        let revealItem = NSMenuItem(
-            title: "Reveal Notes in Finder",
-            action: #selector(revealNotesInFinder),
-            keyEquivalent: ""
-        )
-        revealItem.target = self
-        menu.addItem(revealItem)
-
-        let settingsItem = NSMenuItem(
-            title: "Settings…",
-            action: #selector(showSettings),
-            keyEquivalent: ""
-        )
-        settingsItem.target = self
-        menu.addItem(settingsItem)
+        menu.addItem(coreItems.revealInFinder)
+        menu.addItem(coreItems.settings)
 
         menu.addItem(.separator())
 
@@ -501,14 +468,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(
-            title: "Quit Nickel",
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        menu.addItem(quitItem)
+        menu.addItem(coreItems.quit)
 
         return menu
+    }
+
+    /// About / Check for Updates… / Reveal Notes in Finder / Settings… /
+    /// Quit — the five items both `setupMainMenu`'s app menu and `makeMenu`'s
+    /// status-item menu show, kept in one place so their titles and key
+    /// equivalents (Settings' ⌘, in particular) can't drift between the two.
+    /// Builds fresh `NSMenuItem`s on every call: an item can't sit in two
+    /// menus at once.
+    private func appMenuCoreItems() -> AppMenuCoreItems {
+        let about = NSMenuItem(title: "About Nickel", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+
+        let checkForUpdates = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(checkForUpdates),
+            keyEquivalent: ""
+        )
+        checkForUpdates.target = self
+
+        let revealInFinder = NSMenuItem(
+            title: "Reveal Notes in Finder",
+            action: #selector(revealNotesInFinder),
+            keyEquivalent: ""
+        )
+        revealInFinder.target = self
+
+        let settings = NSMenuItem(title: "Settings…", action: #selector(showSettings), keyEquivalent: ",")
+        settings.keyEquivalentModifierMask = [.command]
+        settings.target = self
+
+        let quit = NSMenuItem(title: "Quit Nickel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        return AppMenuCoreItems(
+            about: about,
+            checkForUpdates: checkForUpdates,
+            revealInFinder: revealInFinder,
+            settings: settings,
+            quit: quit
+        )
     }
 
     @objc private func togglePanel() {

@@ -64,9 +64,10 @@ final class SelectionModel: ObservableObject {
     /// (rather than as `@State` in `PanelView`) so `FloatingPanel` — which
     /// owns this object — can consult it directly from its `keyDown`
     /// override and route Esc to closing the overlay instead of the panel's
-    /// own selection-clear/hide handling. `PanelView` sets it in response to
-    /// the `.nickelToggleSectionSwitcher` / `.nickelToggleShortcuts`
-    /// notifications posted by `FloatingPanel.performKeyEquivalent`.
+    /// own selection-clear/hide handling. Set by `toggleOverlay`/
+    /// `toggleSectionSwitcher`/`toggleMoveToSection` below, called directly
+    /// by `FloatingPanel.performKeyEquivalent` and `AppDelegate`'s menu
+    /// actions.
     @Published var presentedOverlay: PanelOverlay?
 
     /// True while the Logbook (cleared notes) has taken over the panel's
@@ -300,6 +301,54 @@ final class SelectionModel: ObservableObject {
     func endRenamingSection() {
         renamingSectionName = nil
         renameText = ""
+    }
+
+    // MARK: - Overlays
+
+    /// Opens `overlay`, or closes it if it's already the one presented
+    /// (⌘K/⌘/ both toggle); opening either one always replaces the other, so
+    /// only one is ever presented at a time. Called directly by
+    /// `FloatingPanel` (⌘/) and `AppDelegate` (the View menu's Keyboard
+    /// Shortcuts item, after `showPanelIfHidden()`).
+    func toggleOverlay(_ overlay: PanelOverlay) {
+        withAnimation(.panelOverlay) {
+            presentedOverlay = (presentedOverlay == overlay) ? nil : overlay
+        }
+    }
+
+    /// ⌘K's toggle: closes the palette if it's already open (in either
+    /// mode), otherwise opens it fresh in switch mode. Kept separate from
+    /// `toggleOverlay` (rather than passed a computed `PanelOverlay` there)
+    /// because that generic helper's equality-based toggle would treat
+    /// re-pressing ⌘K while the palette is open in move mode as "opening a
+    /// different overlay" instead of closing the one that's open. Called
+    /// directly by `FloatingPanel` and `AppDelegate`, same as `toggleOverlay`.
+    func toggleSectionSwitcher() {
+        withAnimation(.panelOverlay) {
+            if case .sectionSwitcher = presentedOverlay {
+                presentedOverlay = nil
+            } else {
+                presentedOverlay = .sectionSwitcher(move: false)
+            }
+        }
+    }
+
+    /// ⌃⌘M's ("Move to Section…") toggle: a no-op with nothing selected or
+    /// while showing the Logbook (Logbook rows can't be moved into a
+    /// section — see `PanelActions.move`). Otherwise closes the palette if
+    /// it's already open in move mode, or opens/re-opens it in move mode —
+    /// mirroring `toggleSectionSwitcher`'s shape, but scoped to move mode
+    /// only so it never closes a switch-mode palette that ⌘K opened. Called
+    /// directly by `FloatingPanel` and `AppDelegate`, same as `toggleOverlay`.
+    func toggleMoveToSection() {
+        guard !isShowingLogbook, !selectedIDs.isEmpty else { return }
+        withAnimation(.panelOverlay) {
+            if case .sectionSwitcher(let move) = presentedOverlay, move {
+                presentedOverlay = nil
+            } else {
+                presentedOverlay = .sectionSwitcher(move: true)
+            }
+        }
     }
 
     // MARK: - Expand / collapse
