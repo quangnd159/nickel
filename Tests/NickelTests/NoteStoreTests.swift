@@ -57,6 +57,40 @@ final class NoteStoreTests: XCTestCase {
         assertInSync("after delete")
     }
 
+    /// `notesRevision` is what the list table's update short-circuit (plan
+    /// 036) trusts to tell "notes changed" apart from "nothing did" — it
+    /// must bump on every mutation that reassigns `notes`, including ones
+    /// that go through subscript mutation (`merge`) rather than a whole-array
+    /// reassignment, and never regress.
+    func testNotesRevisionBumpsOnEveryMutation() {
+        var lastRevision = store.notesRevision
+
+        func assertBumped(_ label: String, line: UInt = #line) {
+            XCTAssertGreaterThan(store.notesRevision, lastRevision, label, line: line)
+            lastRevision = store.notesRevision
+        }
+
+        store.add(text: "a", sourceApp: nil)
+        store.add(text: "b", sourceApp: nil)
+        assertBumped("after add")
+
+        let idA = store.notes[0].id
+        let idB = store.notes[1].id
+
+        store.move(ids: [idA], toSection: "Work")
+        assertBumped("after move")
+
+        store.markDone(ids: [idA])
+        assertBumped("after markDone")
+
+        store.merge(ids: [idA, idB])
+        assertBumped("after merge")
+        let survivorID = store.notes[0].id
+
+        store.delete(ids: [survivorID])
+        assertBumped("after delete")
+    }
+
     // MARK: - add
 
     func testAddCapsTextAtMaxLengthWithEllipsis() {

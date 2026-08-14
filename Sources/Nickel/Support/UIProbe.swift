@@ -575,6 +575,26 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
                     + "(was \(beforeTyping), now \(clipView.bounds.origin.y))"
             )
 
+            #if DEBUG
+            // Plan 036: a keystroke changes `editingText`, which is deliberately
+            // absent from the update stamp, so it must never make it through to
+            // the heavy tail of `update(...)` — only the cheap early-out.
+            if let coordinator = table.coordinator {
+                let before = coordinator.heavyUpdateRunCount
+                for character in ["y", "z", "w"] {
+                    textView.insertText(character, replacementRange: textView.selectedRange())
+                    settle()
+                }
+                check(
+                    coordinator.heavyUpdateRunCount == before,
+                    "typing does not run the full list pipeline "
+                        + "(heavyUpdateRunCount was \(before), now \(coordinator.heavyUpdateRunCount))"
+                )
+            } else {
+                fail("the table has no coordinator to check heavyUpdateRunCount on")
+            }
+            #endif
+
             // A trailing newline is the case the inert measurement twin has
             // to special-case (`NSTextView` reserves a line for it; `Text`
             // doesn't). Type one, then force the row through the stale

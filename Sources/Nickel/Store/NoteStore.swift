@@ -12,6 +12,12 @@ final class NoteStore: ObservableObject {
     /// by-id read contract (see CLAUDE.md) is unchanged — only its cost.
     private(set) var notesByID: [UUID: Note] = [:]
 
+    /// Bumped every time `notes` is assigned/mutated, alongside `notesByID`.
+    /// Lets callers (the list table's update short-circuit) tell "notes
+    /// changed at all" apart from "notes changed in a way that affects rows
+    /// or heights" without diffing the array themselves.
+    private(set) var notesRevision: Int = 0
+
     /// Explicit sections (Copper-style groups), in display order. This is now
     /// the source of truth for a section's existence and ordering — it can
     /// contain sections with no notes in them yet, unlike the old
@@ -76,6 +82,7 @@ final class NoteStore: ObservableObject {
 
     private func rebuildNotesByID() {
         notesByID = Dictionary(notes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        notesRevision += 1
     }
 
     // MARK: - Derived views of `notes`
