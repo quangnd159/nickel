@@ -392,7 +392,9 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
                 // size it's about to stop having. Building the content here
                 // reads the current state directly.
                 measuringHost.rootView = AnyView(
-                    content(for: item).frame(width: width, alignment: .leading)
+                    content(for: item)
+                        .environment(\.isMeasurementOnly, true)
+                        .frame(width: width, alignment: .leading)
                 )
                 measuringHost.setFrameSize(NSSize(width: width, height: 0))
                 measuringHost.layoutSubtreeIfNeeded()
@@ -405,11 +407,11 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         }
         staleHeightRows.removeAll()
 
-        // Leaves nothing hosted: the measuring view builds a real copy of a
-        // row's content, and for the row being edited that would include a
-        // second editor. It's never in a window — `InlineNoteEditorField`
-        // claims first responder through `view.window` — so it can't steal
-        // focus, but there's no reason to keep it alive either.
+        // Leaves nothing hosted. `isMeasurementOnly` keeps the measuring
+        // view from ever constructing a real `InlineNoteEditorField` for the
+        // row being edited — `NoteRowContent` swaps in an inert `Text` of
+        // matching geometry instead — so there's no second editor to worry
+        // about here; this is just hygiene, not a safety net.
         if usedMeasuringHost {
             measuringHost.rootView = AnyView(EmptyView())
         }

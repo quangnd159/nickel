@@ -574,6 +574,30 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
                 "the first keystroke must not scroll at all "
                     + "(was \(beforeTyping), now \(clipView.bounds.origin.y))"
             )
+
+            // A trailing newline is the case the inert measurement twin has
+            // to special-case (`NSTextView` reserves a line for it; `Text`
+            // doesn't). Type one, then force the row through the stale
+            // measurement path — `invalidateAllRowHeights` marks every row
+            // stale, and `measureOutstandingRowHeights` takes the stale
+            // branch (the inert twin) even for a row with a live cell on
+            // screen — and confirm the inert twin's height still matches
+            // what the live editor cell lays out at.
+            textView.insertText("\n", replacementRange: textView.selectedRange())
+            table.coordinator?.invalidateAllRowHeights()
+            settle()
+            let newlineRowRect = table.rect(ofRow: tallRow)
+            if let liveCell = table.view(atColumn: 0, row: tallRow, makeIfNecessary: false) as? NoteListCellView {
+                print("— after typing a trailing newline (forced through the stale/inert-twin path) —")
+                print("  cachedRowHeight=\(newlineRowRect.height)  liveCellIdeal=\(liveCell.contentIdealHeight)")
+                check(
+                    abs((newlineRowRect.height - table.intercellSpacing.height) - liveCell.contentIdealHeight) < 0.5,
+                    "the inert twin's cached height after a trailing newline (\(newlineRowRect.height - table.intercellSpacing.height)) "
+                        + "must match what the live editor cell actually lays out at (\(liveCell.contentIdealHeight))"
+                )
+            } else {
+                fail("the tall editing row has no cell after typing a trailing newline")
+            }
         } else {
             fail("no text view in the editing cell")
         }
