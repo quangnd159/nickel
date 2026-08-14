@@ -32,7 +32,7 @@ final class NoteEditorWindowManager {
         guard let note = store.activeNotes.first(where: { $0.id == noteID }) else { return }
 
         if let existing = controllers[noteID] {
-            NSApp.activate(ignoringOtherApps: true)
+            AppActivation.activate()
             existing.window?.makeKeyAndOrderFront(nil)
             existing.focusTextView()
             return
@@ -56,7 +56,7 @@ final class NoteEditorWindowManager {
         }
 
         controller.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate()
         controller.window?.makeKeyAndOrderFront(nil)
         controller.focusTextView()
     }

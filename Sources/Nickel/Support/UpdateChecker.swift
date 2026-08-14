@@ -101,7 +101,7 @@ enum UpdateChecker {
     }
 
     private static func presentUpdateAvailable(version: String, releaseURL: String) {
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate()
         let alert = NSAlert()
         alert.messageText = "Nickel \(version) is available."
         alert.informativeText = "You're currently running an older version."
@@ -117,7 +117,7 @@ enum UpdateChecker {
     }
 
     private static func presentUpToDate() {
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate()
         let alert = NSAlert()
         alert.messageText = "You're up to date."
         alert.informativeText = "Nickel is on the latest version."
@@ -126,7 +126,7 @@ enum UpdateChecker {
     }
 
     private static func presentNoReleases() {
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate()
         let alert = NSAlert()
         alert.messageText = "You're up to date."
         alert.informativeText = "No releases have been published yet."
@@ -135,7 +135,7 @@ enum UpdateChecker {
     }
 
     private static func presentError(_ message: String) {
-        NSApp.activate(ignoringOtherApps: true)
+        AppActivation.activate()
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Couldn't check for updates."
