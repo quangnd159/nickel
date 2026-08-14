@@ -602,7 +602,8 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// Table → `SelectionModel`, for user-driven selection only.
     func tableViewSelectionDidChange(_ notification: Notification) {
         guard !isSyncingSelection, selection != nil else { return }
-        let ids = tableView.selectedRowIndexes.compactMap { rows[$0].noteID }
+        // Same out-of-model ask as heightOfRow documents.
+        let ids = tableView.selectedRowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].noteID : nil }
         selection.selectedIDs = Set(ids)
     }
 
@@ -863,11 +864,15 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool {
-        !rows[row].isSelectable
+        // Same out-of-model ask as heightOfRow documents.
+        guard rows.indices.contains(row) else { return false }
+        return !rows[row].isSelectable
     }
 
     func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool {
-        rows[row].isSelectable
+        // Same out-of-model ask as heightOfRow documents.
+        guard rows.indices.contains(row) else { return false }
+        return rows[row].isSelectable
     }
 
     func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
@@ -880,6 +885,8 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        // Same out-of-model ask as heightOfRow documents.
+        guard rows.indices.contains(row) else { return nil }
         let cell = NoteListCellView()
         cell.onIdealHeightChange = { [weak self, weak cell] height in
             guard let self, let cell else { return }

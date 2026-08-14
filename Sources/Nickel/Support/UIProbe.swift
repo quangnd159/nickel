@@ -232,6 +232,8 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
 
         checkDragMove(table: table, store: store, selection: selection)
 
+        checkDelegateGuards(table: table)
+
         finish()
     }
 
@@ -605,6 +607,56 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             mismatches.isEmpty,
             "every row's height must match its cell's layout (\(mismatches.count) of \(checked) wrong)"
         )
+    }
+
+    /// The table asks its delegate about row indices outside the current
+    /// model (`.gap` drop feedback, animated removals) — `heightOfRow`
+    /// already guards for that; this checks the other callbacks answer
+    /// out-of-range asks without trapping, and that a row rect and its cell
+    /// frame agree on where the row starts.
+    private func checkDelegateGuards(table: NoteListTableView) {
+        guard let delegate = table.delegate else {
+            fail("table has no delegate to probe")
+            return
+        }
+        let rowCount = table.numberOfRows
+
+        print("— delegate guards —")
+        check(
+            delegate.tableView?(table, isGroupRow: rowCount) == false,
+            "isGroupRow(rowCount) should return false, not trap"
+        )
+        check(
+            delegate.tableView?(table, isGroupRow: rowCount + 1) == false,
+            "isGroupRow(rowCount + 1) should return false, not trap"
+        )
+        check(
+            delegate.tableView?(table, shouldSelectRow: rowCount) == false,
+            "shouldSelectRow(rowCount) should return false, not trap"
+        )
+        check(
+            delegate.tableView?(table, shouldSelectRow: rowCount + 1) == false,
+            "shouldSelectRow(rowCount + 1) should return false, not trap"
+        )
+        check(
+            delegate.tableView?(table, viewFor: table.tableColumns[0], row: rowCount) == nil,
+            "viewFor(rowCount) should return nil, not trap"
+        )
+
+        // Coordinate-space agreement: a row's rect and its cell's frame
+        // should share an x-origin. `pointInRow` assumes they do; this only
+        // measures, per the plan — a real delta is a separate fix.
+        if rowCount > 0 {
+            let rowRect = table.rect(ofRow: 0)
+            let cellFrame = table.frameOfCell(atColumn: 0, row: 0)
+            let delta = abs(rowRect.minX - cellFrame.minX)
+            print("  row rect minX=\(rowRect.minX), cell frame minX=\(cellFrame.minX), delta=\(delta)")
+            if delta < 0.5 {
+                check(true, "row rect and cell frame share an x-origin (delta \(delta))")
+            } else {
+                print("  MEASURED (not asserted per plan): x-origin delta is \(delta), exceeds 0.5pt")
+            }
+        }
     }
 
     private func firstTextView(in view: NSView) -> NSTextView? {
