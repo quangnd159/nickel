@@ -80,6 +80,10 @@ struct PanelView: View {
     /// composer after a drop, paperclip pick, or ⌘V paste stages new
     /// attachments; `nil` when nothing is showing. See `showAttachmentToast`.
     @State private var attachmentToast: String?
+    // The empty state is long-lived (unlike `ShortcutsOverlay`, which is
+    // recreated on each presentation), so it must follow Settings changes
+    // rather than read `PanelSettings.captureKey` once.
+    @State private var captureKey = PanelSettings.captureKey
     /// Cancelled and rescheduled by `showAttachmentToast` so back-to-back
     /// stagings (e.g. dropping a few files right after pasting one) restart
     /// the auto-dismiss timer instead of an old one hiding the new toast
@@ -203,6 +207,9 @@ struct PanelView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .nickelComposerPaste)) { _ in
             stagePasteboardAttachments()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: PanelSettings.captureKeyDidChange)) { _ in
+            captureKey = PanelSettings.captureKey
         }
         .confirmationDialog(
             "Delete Section",
@@ -513,7 +520,7 @@ struct PanelView: View {
 
     private var emptyState: some View {
         VStack(spacing: 6) {
-            Text("Double-tap left Shift anywhere to capture")
+            Text("Double-tap \(captureKey.sentencePhrase) anywhere to capture")
                 .font(.system(size: 13))
                 .foregroundStyle(.secondary)
 
