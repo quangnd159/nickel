@@ -1163,6 +1163,30 @@ final class NoteListRowView: NSTableRowView {
     override func drawSelection(in dirtyRect: NSRect) {}
     override func drawBackground(in dirtyRect: NSRect) {}
 
+    /// The selected look: a 2pt ring on the cell's layer — the same layer
+    /// that carries the rounded clip — so it hugs the row's animated bounds
+    /// on every frame of a height change. Drawn as SwiftUI content it sat at
+    /// the content's final size and was visibly clipped mid-animation.
+    /// AppKit updates `isSelected`/`isEmphasized` on selection, focus and
+    /// key-window changes, so the ring follows the system's own
+    /// accent-vs-gray rule with no extra wiring.
+    override var isSelected: Bool { didSet { applySelectionRing() } }
+    override var isEmphasized: Bool { didSet { applySelectionRing() } }
+
+    override func didAddSubview(_ subview: NSView) {
+        super.didAddSubview(subview)
+        applySelectionRing()
+    }
+
+    private func applySelectionRing() {
+        let color: NSColor? = isSelected
+            ? (isEmphasized ? .controlAccentColor : .unemphasizedSelectedContentBackgroundColor)
+            : nil
+        for case let cell as NoteListCellView in subviews {
+            cell.setSelectionRing(color)
+        }
+    }
+
     /// A selected row normally reports `.emphasized` here, which tells the
     /// cell's content to draw for a filled accent highlight — SwiftUI hosted
     /// in the cell responds by flipping `.primary` text to white, invisible
@@ -1212,6 +1236,28 @@ final class NoteListCellView: NSTableCellView {
     var onIdealHeightChange: ((CGFloat) -> Void)? {
         get { host.onIdealHeightChange }
         set { host.onIdealHeightChange = newValue }
+    }
+
+    /// The selection ring, driven by `NoteListRowView` (see there for why it
+    /// lives on this layer and not in the SwiftUI content). Re-resolved on
+    /// appearance changes because a `CGColor` doesn't track dark mode.
+    private var selectionRingColor: NSColor?
+
+    func setSelectionRing(_ color: NSColor?) {
+        selectionRingColor = color
+        applySelectionRing()
+    }
+
+    private func applySelectionRing() {
+        layer?.borderWidth = selectionRingColor == nil ? 0 : 2
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.borderColor = selectionRingColor?.cgColor
+        }
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applySelectionRing()
     }
 
     /// Whether this cell's content currently takes clicks. Read by `UIProbe`.

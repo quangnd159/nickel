@@ -97,24 +97,12 @@ struct NoteRowContent: View {
     /// `NoteSourceTextView` use since `@FocusState` doesn't reach into an
     /// `NSViewRepresentable`.
     @State private var editFieldFocused: Bool = false
-    @Environment(\.controlActiveState) private var controlActiveState
     @Environment(\.isMeasurementOnly) private var isMeasurementOnly
 
     private var note: Note? { store.notesByID[noteID] }
 
-    private var isSelected: Bool { selection.selectedIDs.contains(noteID) }
     private var isEditing: Bool { selection.editingID == noteID }
 
-    /// Selection outline color. AppKit draws selection with the accent color
-    /// only while the window is key and drops to the unemphasized gray
-    /// otherwise (`NSTableView`'s emphasized/unemphasized pair), so the row
-    /// follows the same rule rather than staying vividly selected behind an
-    /// inactive panel.
-    private var selectionStroke: Color {
-        controlActiveState == .key
-            ? .accentColor
-            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    }
     private static let attachmentsSpace = "NoteRow.attachments"
 
     var body: some View {
@@ -173,14 +161,9 @@ struct NoteRowContent: View {
             RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
                 .fill(Color(nsColor: .textBackgroundColor))
         )
-        // The selected look, drawn here rather than by `NSTableRowView`'s
-        // default fill: an outline, not a filled highlight. `NoteListRowView`
-        // suppresses AppKit's own selection drawing so this is the only one.
-        .overlay(
-            RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
-                .strokeBorder(selectionStroke, lineWidth: 2)
-                .opacity(isSelected ? 1 : 0)
-        )
+        // No selection ring here: the selected look is a 2pt border on the
+        // cell's layer, driven by `NoteListRowView`, so it rides the row's
+        // animated bounds instead of being clipped mid-animation.
         .coordinateSpace(name: Self.attachmentsSpace)
     }
 

@@ -481,6 +481,19 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         // animation's run. (Table coordinates are content-relative, so the
         // reveal scroll doesn't pollute the samples.)
         selection.selectSingle(bottomNote.id)
+        settle()
+        // The selection ring lives on the cell's layer (not in the SwiftUI
+        // content) so it rides the row's animated bounds instead of being
+        // clipped mid-animation. Selected: 2pt border; deselected: none.
+        if let selectedCell = table.view(atColumn: 0, row: bottomRow, makeIfNecessary: false) {
+            check(
+                selectedCell.layer?.borderWidth == 2,
+                "a selected row's cell should carry the 2pt selection ring on its layer "
+                    + "(borderWidth \(selectedCell.layer?.borderWidth ?? -1))"
+            )
+        } else {
+            fail("the selected row has no cell to check the ring on")
+        }
         selection.beginEditing(id: bottomNote.id, text: bottomNote.text)
         var textYs: [CGFloat] = []
         let deadline = Date().addingTimeInterval(0.35)

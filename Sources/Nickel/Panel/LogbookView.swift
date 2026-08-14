@@ -144,19 +144,7 @@ struct LogbookRowContent: View {
     @EnvironmentObject private var store: NoteStore
     @EnvironmentObject private var selection: SelectionModel
     @EnvironmentObject private var actions: PanelActions
-    @Environment(\.controlActiveState) private var controlActiveState
-
     private var note: Note? { store.notesByID[noteID] }
-
-    private var isSelected: Bool { selection.selectedIDs.contains(noteID) }
-
-    /// Same emphasized/unemphasized pair `NoteRowContent` uses, so a Logbook
-    /// row selected behind an inactive panel dims like any other list row.
-    private var selectionStroke: Color {
-        controlActiveState == .key
-            ? .accentColor
-            : Color(nsColor: .unemphasizedSelectedContentBackgroundColor)
-    }
 
     var body: some View {
         if let note {
@@ -210,13 +198,8 @@ struct LogbookRowContent: View {
         // `.textBackgroundColor` card. The Logbook is a settled record, not
         // another active list, so its rows shouldn't compete with the live
         // list's elevated look — the day headers above carry the structure
-        // instead. Selection still reads clearly via the stroke below, the
-        // same style the live list uses.
-        .overlay(
-            RoundedRectangle(cornerRadius: NoteRowMetrics.cornerRadius, style: .continuous)
-                .strokeBorder(selectionStroke, lineWidth: 2)
-                .opacity(isSelected ? 1 : 0)
-        )
+        // instead. Selection still reads clearly via the same 2pt ring the
+        // live list uses, drawn on the cell's layer by `NoteListRowView`.
     }
 
     /// The notes a menu item acts on: the whole selection when this row is
