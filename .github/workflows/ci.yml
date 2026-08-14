@@ -7,7 +7,9 @@ on:
 
 jobs:
   test:
-    runs-on: macos-14
+    # Must match the app's OS floor (macOS 26): the SwiftUI APIs it uses
+    # (glassEffect etc.) don't exist in older runners' SDKs.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - name: Build
