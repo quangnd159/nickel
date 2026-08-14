@@ -180,6 +180,9 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// drags at the field editor makes every file type take the same
     /// fall-through path to the drop region. (Drops of plain *text content*
     /// still work: the drop region itself inserts text into the composer.)
+    ///
+    /// Also disables automatic quote/dash/text substitution — Markdown
+    /// source; see `NoteSourceTextView`.
     private final class DragRejectingFieldEditor: NSTextView {
         override var acceptableDragTypes: [NSPasteboard.PasteboardType] { [] }
     }
@@ -187,6 +190,9 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     private lazy var dragRejectingFieldEditor: DragRejectingFieldEditor = {
         let editor = DragRejectingFieldEditor()
         editor.isFieldEditor = true
+        editor.isAutomaticQuoteSubstitutionEnabled = false
+        editor.isAutomaticDashSubstitutionEnabled = false
+        editor.isAutomaticTextReplacementEnabled = false
         return editor
     }()
 

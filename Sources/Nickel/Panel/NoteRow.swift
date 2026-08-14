@@ -377,6 +377,10 @@ private struct InlineNoteEditorField: NSViewRepresentable {
         view.setContentCompressionResistancePriority(.required, for: .vertical)
         view.font = .systemFont(ofSize: 14)
         view.textColor = .labelColor
+        // Markdown source; see NoteSourceTextView.
+        view.isAutomaticQuoteSubstitutionEnabled = false
+        view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false
         view.defaultParagraphStyle = Self.paragraphStyle
         view.typingAttributes = Self.textAttributes
         view.textStorage?.setAttributedString(NSAttributedString(string: text, attributes: Self.textAttributes))
