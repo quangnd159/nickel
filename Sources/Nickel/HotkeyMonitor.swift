@@ -65,6 +65,39 @@ enum ModifierKey: String, CaseIterable {
         case .rightCommand: return "⌘ Right Command"
         }
     }
+
+    /// The bare modifier glyph, e.g. "⇧".
+    var glyph: String {
+        switch self {
+        case .leftShift, .rightShift: return "⇧"
+        case .leftControl, .rightControl: return "⌃"
+        case .leftOption, .rightOption: return "⌥"
+        case .leftCommand, .rightCommand: return "⌘"
+        }
+    }
+
+    /// The lowercase side word, e.g. "left".
+    var sideWord: String {
+        switch self {
+        case .leftShift, .leftControl, .leftOption, .leftCommand: return "left"
+        case .rightShift, .rightControl, .rightOption, .rightCommand: return "right"
+        }
+    }
+
+    /// Mid-sentence phrase, e.g. "left Shift" — for use in copy like
+    /// "Double-tap <phrase> anywhere to capture".
+    var sentencePhrase: String {
+        switch self {
+        case .leftShift: return "left Shift"
+        case .rightShift: return "right Shift"
+        case .leftControl: return "left Control"
+        case .rightControl: return "right Control"
+        case .leftOption: return "left Option"
+        case .rightOption: return "right Option"
+        case .leftCommand: return "left Command"
+        case .rightCommand: return "right Command"
+        }
+    }
 }
 
 /// Detects a system-wide double-tap of any of the 8 physical modifier keys:

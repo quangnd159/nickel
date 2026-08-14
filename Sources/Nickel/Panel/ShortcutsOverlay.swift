@@ -35,8 +35,8 @@ struct ShortcutsOverlay: View {
                 .font(.system(size: 13, weight: .semibold))
 
             group("Capture", [
-                ShortcutRow("Capture selection", ["⇧⇧", "left"]),
-                ShortcutRow("Show/hide panel", ["⇧⇧", "right"])
+                ShortcutRow("Capture selection", [captureKeyGlyph, PanelSettings.captureKey.sideWord]),
+                ShortcutRow("Show/hide panel", [panelToggleKeyGlyph, PanelSettings.panelToggleKey.sideWord])
             ])
 
             group("Navigate", [
@@ -114,6 +114,19 @@ struct ShortcutsOverlay: View {
         selection.presentedOverlay = nil
     }
 
+    /// Doubled glyph for the capture key's key cap (the double-tap gesture
+    /// has no single key symbol of its own).
+    private var captureKeyGlyph: String {
+        let glyph = PanelSettings.captureKey.glyph
+        return glyph + glyph
+    }
+
+    /// Doubled glyph for the panel-toggle key's key cap.
+    private var panelToggleKeyGlyph: String {
+        let glyph = PanelSettings.panelToggleKey.glyph
+        return glyph + glyph
+    }
+
     /// Builds a row from `PanelShortcuts`' table entry for `command`, the
     /// single source of truth these labels and key caps come from — see
     /// `PanelShortcuts.swift`.
@@ -135,8 +148,9 @@ struct ShortcutsOverlay: View {
 }
 
 /// One row's label and its key caps (rendered one cap per element of `keys`,
-/// e.g. `["⌘", "K"]` for ⌘K, or `["⇧⇧", "left"]` for the double-shift capture
-/// gesture, which has no single key symbol of its own).
+/// e.g. `["⌘", "K"]` for ⌘K, or a doubled modifier glyph plus a side word
+/// for the double-tap capture gesture, which has no single key symbol of its
+/// own).
 private struct ShortcutRow: Identifiable {
     let label: String
     let keys: [String]
