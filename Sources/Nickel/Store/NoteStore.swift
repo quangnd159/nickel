@@ -558,13 +558,20 @@ final class NoteStore: ObservableObject {
     /// editing the in-memory array), then appended to the survivor's list.
     func merge(ids: Set<UUID>) {
         guard ids.count > 1 else { return }
-        let targets = notes.filter { ids.contains($0.id) }.sorted { $0.createdAt < $1.createdAt }
-        guard let first = targets.first, let firstIndex = notes.firstIndex(where: { $0.id == first.id }) else {
+        // Visible order: the notes array IS the display order (drag reorder
+        // edits it), so the merged text must read top-to-bottom as the user
+        // saw it.
+        let inVisibleOrder = notes.filter { ids.contains($0.id) }
+        // The earliest-created note survives: its id anchors the on-disk
+        // attachments directory, so keeping it avoids relocating the
+        // survivor's own files.
+        guard let first = inVisibleOrder.min(by: { $0.createdAt < $1.createdAt }),
+              let firstIndex = notes.firstIndex(where: { $0.id == first.id }) else {
             return
         }
-        let donors = targets.dropFirst()
+        let donors = inVisibleOrder.filter { $0.id != first.id }
 
-        let mergedText = targets.map(\.text).joined(separator: "\n\n")
+        let mergedText = inVisibleOrder.map(\.text).joined(separator: "\n\n")
         notes[firstIndex].text = mergedText
 
         var movedByDonor: [UUID: [Attachment]] = [:]
