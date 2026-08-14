@@ -243,6 +243,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
 
+        // A "File" menu with New Note and Close: the standard first menu
+        // after the app menu, even though Nickel has no document model —
+        // both items act on the one panel, same as every View item below.
+        let fileMenuItem = NSMenuItem()
+        let fileMenu = NSMenu(title: "File")
+        fileMenu.addItem(windowMenuItem(for: .newNote, action: #selector(newNote)))
+        fileMenu.addItem(.separator())
+        fileMenu.addItem(windowMenuItem(for: .closePanel, action: #selector(closePanel)))
+        fileMenuItem.submenu = fileMenu
+        mainMenu.addItem(fileMenuItem)
+
         let editMenuItem = NSMenuItem()
         let editMenu = NSMenu(title: "Edit")
         editMenu.addItem(
@@ -270,6 +281,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(.separator())
         editMenu.addItem(
             NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+        )
+        editMenu.addItem(.separator())
+        editMenu.addItem(windowMenuItem(for: .findFocus, action: #selector(focusSearch)))
+        editMenu.addItem(.separator())
+        // No target: routed through the responder chain to the system's own
+        // handler, which supplies the fn/🌐 key equivalent itself.
+        editMenu.addItem(
+            NSMenuItem(
+                title: "Emoji & Symbols",
+                action: #selector(NSApplication.orderFrontCharacterPalette(_:)),
+                keyEquivalent: ""
+            )
         )
         editMenuItem.submenu = editMenu
         mainMenu.addItem(editMenuItem)
@@ -357,6 +380,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         item.keyEquivalentModifierMask = shortcut.menuKeyEquivalent.modifiers
         item.target = self
         return item
+    }
+
+    @objc private func newNote() {
+        showPanelIfHidden()
+        NotificationCenter.default.post(name: .nickelFocusComposer, object: nil)
+    }
+
+    /// The File menu's Close: mirrors the panel's own ⌘W handling (a no-op
+    /// with nothing visible to close), rather than `showPanelIfHidden()` +
+    /// close, which would show the panel only to immediately hide it again.
+    @objc private func closePanel() {
+        if let panel, panel.isVisible {
+            panel.toggle()
+        }
+    }
+
+    @objc private func focusSearch() {
+        showPanelIfHidden()
+        NotificationCenter.default.post(name: .nickelFocusSearch, object: nil)
     }
 
     @objc private func switchSection() {
