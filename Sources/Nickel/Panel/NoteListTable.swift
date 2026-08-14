@@ -273,9 +273,8 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
                 continue
             }
             cell.configure(
-                content: content(for: rows[row], at: row),
+                content: content(for: rows[row]),
                 row: rows[row],
-                index: row,
                 interactive: isInteractive(rows[row])
             )
         }
@@ -395,7 +394,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
                 // size it's about to stop having. Building the content here
                 // reads the current state directly.
                 measuringHost.rootView = AnyView(
-                    content(for: item, at: index).frame(width: width, alignment: .leading)
+                    content(for: item).frame(width: width, alignment: .leading)
                 )
                 measuringHost.setFrameSize(NSSize(width: width, height: 0))
                 measuringHost.layoutSubtreeIfNeeded()
@@ -893,9 +892,8 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
             self.rowHeight(height, didSettleIn: cell)
         }
         cell.configure(
-            content: content(for: rows[row], at: row),
+            content: content(for: rows[row]),
             row: rows[row],
-            index: row,
             interactive: isInteractive(rows[row])
         )
         return cell
@@ -918,7 +916,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     }
 
     @ViewBuilder
-    private func content(for row: NoteListRow, at index: Int) -> some View {
+    private func content(for row: NoteListRow) -> some View {
         switch row {
         case .note(let id):
             if mode == .logbook {
@@ -941,9 +939,9 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
                 .environmentObject(store)
                 .environmentObject(selection)
                 .environmentObject(actions)
-        case .dayHeader(let day):
+        case .dayHeader(let day, let isFirst):
             LogbookDayHeader(day: day)
-                .padding(.top, index == 0 ? 0 : 12)
+                .padding(.top, isFirst ? 0 : 12)
         case .logbookFooter:
             LogbookFooter()
                 .padding(.top, 8)
@@ -1085,7 +1083,6 @@ final class NoteListCellView: NSTableCellView {
     /// table keeps it as rows come and go around it — so everything derived
     /// from the row model has to be re-derived, not captured once at creation.
     private var configuredRow: NoteListRow?
-    private var configuredIndex: Int?
 
     /// The content as the coordinator built it, before the width is pinned on
     /// (see `applyContent`), so a resize can re-pin without rebuilding it.
@@ -1126,11 +1123,10 @@ final class NoteListCellView: NSTableCellView {
     /// take clicks so the caret can be placed, and give them back up when the
     /// edit ends. Re-hosting the content is the expensive half, so that only
     /// happens when the row or its position actually changed.
-    func configure(content: some View, row: NoteListRow, index: Int, interactive: Bool) {
+    func configure(content: some View, row: NoteListRow, interactive: Bool) {
         host.isInteractive = interactive
-        guard configuredRow != row || configuredIndex != index else { return }
+        guard configuredRow != row else { return }
         configuredRow = row
-        configuredIndex = index
         baseContent = AnyView(
             content.onPreferenceChange(NoteAttachmentFramesKey.self) { [weak self] frames in
                 self?.attachmentFrames = frames

@@ -164,7 +164,7 @@ final class NoteListDropTests: XCTestCase {
     // MARK: - Refusals
 
     func testTheLogbookRefusesEveryDrop() {
-        let rows: [NoteListRow] = [.dayHeader(Date()), .note(u1), .logbookFooter]
+        let rows: [NoteListRow] = [.dayHeader(Date(), isFirst: true), .note(u1), .logbookFooter]
         for row in 0...3 {
             XCTAssertEqual(resolve(rows: rows, row: row, mode: .logbook), .reject, "row \(row)")
             XCTAssertEqual(resolve(rows: rows, row: row, operation: .on, mode: .logbook), .reject, "row \(row) on")
@@ -174,7 +174,7 @@ final class NoteListDropTests: XCTestCase {
     /// Defensive: the Logbook's own rows are refused even if they somehow turn
     /// up in a list that allows drops.
     func testDayHeadersAndTheFooterAreNeverDropTargets() {
-        let rows: [NoteListRow] = [.dayHeader(Date()), .note(u1), .logbookFooter]
+        let rows: [NoteListRow] = [.dayHeader(Date(), isFirst: true), .note(u1), .logbookFooter]
         XCTAssertEqual(resolve(rows: rows, row: 0), .reject)
         XCTAssertEqual(resolve(rows: rows, row: 2), .reject)
     }

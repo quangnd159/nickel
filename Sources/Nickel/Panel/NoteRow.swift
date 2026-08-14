@@ -80,7 +80,7 @@ struct NoteRowContent: View {
     @State private var editFieldFocused: Bool = false
     @Environment(\.controlActiveState) private var controlActiveState
 
-    private var note: Note? { store.notes.first { $0.id == noteID } }
+    private var note: Note? { store.notesByID[noteID] }
 
     private var isSelected: Bool { selection.selectedIDs.contains(noteID) }
     private var isEditing: Bool { selection.editingID == noteID }

@@ -4,7 +4,13 @@ import Foundation
 /// Mutations are applied synchronously in memory and saved to disk on a short
 /// debounce so rapid edits don't thrash the filesystem.
 final class NoteStore: ObservableObject {
-    @Published private(set) var notes: [Note]
+    @Published private(set) var notes: [Note] {
+        didSet { rebuildNotesByID() }
+    }
+
+    /// O(1) row lookup; rebuilt wherever `notes` is assigned/mutated. The
+    /// by-id read contract (see CLAUDE.md) is unchanged — only its cost.
+    private(set) var notesByID: [UUID: Note] = [:]
 
     /// Explicit sections (Copper-style groups), in display order. This is now
     /// the source of truth for a section's existence and ordering — it can
@@ -55,6 +61,9 @@ final class NoteStore: ObservableObject {
         self.notes = loaded.notes
         self.sections = loaded.sections
         self.activeSection = loaded.activeSection
+        // `didSet` doesn't fire for the initial assignment above (still
+        // inside `init`), so the index needs its own first build.
+        rebuildNotesByID()
 
         // A failed/corrupt load leaves `notes` empty without those notes
         // actually being gone (see `load`'s failure paths), so sweeping now
@@ -63,6 +72,10 @@ final class NoteStore: ObservableObject {
         if loaded.loadedCleanly {
             sweepOrphanedAttachmentDirectories()
         }
+    }
+
+    private func rebuildNotesByID() {
+        notesByID = Dictionary(notes.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
     // MARK: - Derived views of `notes`

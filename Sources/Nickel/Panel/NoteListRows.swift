@@ -11,7 +11,7 @@ import Foundation
 enum NoteListRow: Hashable {
     case note(UUID)
     case sectionHeader(String)
-    case dayHeader(Date)
+    case dayHeader(Date, isFirst: Bool)
     case logbookFooter
 
     var noteID: UUID? {
@@ -55,8 +55,8 @@ enum NoteListRows {
         let groups = logbookGroups(notes, calendar: calendar)
         guard !groups.isEmpty else { return [] }
         var rows: [NoteListRow] = []
-        for group in groups {
-            rows.append(.dayHeader(group.day))
+        for (offset, group) in groups.enumerated() {
+            rows.append(.dayHeader(group.day, isFirst: offset == 0))
             rows += group.notes.map { .note($0.id) }
         }
         rows.append(.logbookFooter)
