@@ -175,6 +175,23 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         table.doubleAction = #selector(NoteListTableView.handleDoubleClick)
         table.target = table
 
+        // Drag to reorder, and to move notes between sections. The Logbook is
+        // neither a drag source nor a drop target — it's a settled record —
+        // so it registers nothing and refuses to write a pasteboard item.
+        if mode == .notes {
+            table.registerForDraggedTypes([.nickelNoteID])
+            // Inside the app a drag is always a move: reordering that left a
+            // copy behind would be nonsense. Dragging a note out to another
+            // app copies its text instead.
+            table.setDraggingSourceOperationMask(.move, forLocal: true)
+            table.setDraggingSourceOperationMask(.copy, forLocal: false)
+            // The drop position opens as a gap and the rows around it move
+            // apart, rather than an insertion line being drawn between them.
+            // Only ever meaningful with `.above` drops, which is all this list
+            // has — see `NoteListDrop`.
+            table.draggingDestinationFeedbackStyle = .gap
+        }
+
         let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("note"))
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
@@ -333,6 +350,10 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// assertion. Rows with no height yet get a provisional one and are
     /// measured on the next runloop turn instead.
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
+        // Out of range without scheduling anything: the table asks about rows
+        // that aren't in the model while `.gap` feedback opens a drop gap
+        // mid-drag, and measuring in response would put a layout pass in the
+        // middle of a drag for a row that doesn't exist.
         guard rows.indices.contains(row) else { return Self.provisionalRowHeight }
         guard let cached = rowHeights[rows[row]] else {
             scheduleHeightFlush()
@@ -667,6 +688,176 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         return NoteContextMenu.menu(mode: mode, store: store, selection: selection, actions: actions)
     }
 
+    // MARK: Drag and drop
+
+    /// The notes in the current drag, in the order they appear on screen —
+    /// which is the order they're re-inserted in at the destination.
+    private var draggedNoteIDs: [UUID] = []
+
+    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> NSPasteboardWriting? {
+        guard mode == .notes, rows.indices.contains(row), let id = rows[row].noteID else { return nil }
+        guard let note = store.notes.first(where: { $0.id == id }) else { return nil }
+        let item = NSPasteboardItem()
+        item.setString(id.uuidString, forType: .nickelNoteID)
+        // Free of charge, and the obvious thing to expect: dragging a note
+        // into any other app drops its text.
+        item.setString(note.text, forType: .string)
+        return item
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        draggingSession session: NSDraggingSession,
+        willBeginAt screenPoint: NSPoint,
+        forRowIndexes rowIndexes: IndexSet
+    ) {
+        // Ascending row order is visible order.
+        draggedNoteIDs = rowIndexes.compactMap { rows.indices.contains($0) ? rows[$0].noteID : nil }
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        draggingSession session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        draggedNoteIDs = []
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        validateDrop info: NSDraggingInfo,
+        proposedRow row: Int,
+        proposedDropOperation dropOperation: NSTableView.DropOperation
+    ) -> NSDragOperation {
+        guard case .accept(let targetRow, let targetOperation, _) = resolveDrop(row: row, operation: dropOperation, info: info) else {
+            return []
+        }
+        tableView.setDropRow(targetRow, dropOperation: targetOperation)
+        return .move
+    }
+
+    func tableView(
+        _ tableView: NSTableView,
+        acceptDrop info: NSDraggingInfo,
+        row: Int,
+        dropOperation: NSTableView.DropOperation
+    ) -> Bool {
+        guard case .accept(_, _, let target) = resolveDrop(row: row, operation: dropOperation, info: info) else {
+            return false
+        }
+        let ids = draggedNoteIDs
+        guard !ids.isEmpty else { return false }
+
+        // The store is told first and stays the only truth for note order.
+        store.move(ids: ids, toSection: target.section, before: target.beforeID)
+
+        // The dragged notes stay selected. This looks like the opposite of the
+        // ⌃⌘M palette, which clears the selection after moving — but there the
+        // notes leave the view (the palette switches to another section), so
+        // keeping them selected would strand a selection off screen. Here they
+        // are still right there, under the pointer that just put them down.
+        selection.selectedIDs = Set(ids)
+
+        // Then the rows are *moved* into place rather than left to the diff,
+        // which would remove and re-insert them — the dragged row fading out
+        // of the gap it was dropped into and fading back in. See
+        // `applyDropAsMoves`.
+        applyDropAsMoves(to: NoteListRows.rows(store: store, selection: selection))
+        landDragImages(info, on: ids)
+        return true
+    }
+
+    /// Re-seats the rows a drop moved, as moves.
+    ///
+    /// The store has already been mutated; this is presentation only, and it
+    /// deliberately runs to the *same* order the store now implies, so the
+    /// update that follows diffs to nothing. Without it that update would be
+    /// the first thing to notice the new order, and would express it as a
+    /// removal plus an insertion — the row disappearing and reappearing, which
+    /// is exactly the flash a drop shouldn't have.
+    ///
+    /// A drop only ever permutes rows: a note's identity doesn't change when it
+    /// moves between sections, and headers exist whether or not their section
+    /// has notes. Anything else falls through to the ordinary diff.
+    func applyDropAsMoves(to newRows: [NoteListRow]) {
+        guard newRows.count == rows.count, Set(newRows) == Set(rows) else { return }
+
+        var working = rows
+        var moves: [(from: Int, to: Int)] = []
+        for targetIndex in newRows.indices {
+            let item = newRows[targetIndex]
+            guard let currentIndex = working.firstIndex(of: item), currentIndex != targetIndex else { continue }
+            working.remove(at: currentIndex)
+            working.insert(item, at: targetIndex)
+            moves.append((from: currentIndex, to: targetIndex))
+        }
+        guard !moves.isEmpty else { return }
+
+        // The model goes first: the table asks for views and heights during the
+        // animation, and every index it asks about has to already mean what it
+        // will mean when the animation lands.
+        rows = newRows
+        isSyncingSelection = true
+        tableView.beginUpdates()
+        for move in moves {
+            tableView.moveRow(at: move.from, to: move.to)
+        }
+        tableView.endUpdates()
+        isSyncingSelection = false
+    }
+
+    /// Animates the floating drag image onto the row it became, so what the
+    /// pointer let go of is what settles into the list.
+    ///
+    /// The documented sequence: set `animatesToDestination`, then set each
+    /// dragging item's `draggingFrame` to its destination, both during the
+    /// drop — "you should enumerate through the dragging items during
+    /// `performDragOperation:` to set the item's `draggingFrame` to the correct
+    /// destinations", which for a table view is this method. Enumeration order
+    /// matches the order the items were written in `pasteboardWriterForRow`,
+    /// which is ascending row order — the same order as `ids` — so a
+    /// multi-note drag lands each image on its own row.
+    private func landDragImages(_ info: NSDraggingInfo, on ids: [UUID]) {
+        let frames = ids.compactMap { id -> NSRect? in
+            guard let row = rows.firstIndex(of: .note(id)) else { return nil }
+            return tableView.frameOfCell(atColumn: 0, row: row)
+        }
+        guard frames.count == ids.count else { return }
+
+        info.animatesToDestination = true
+        info.enumerateDraggingItems(
+            options: [],
+            for: tableView,
+            classes: [NSPasteboardItem.self],
+            searchOptions: [:]
+        ) { item, index, _ in
+            guard frames.indices.contains(index) else { return }
+            item.draggingFrame = frames[index]
+        }
+    }
+
+    private func resolveDrop(
+        row: Int,
+        operation: NSTableView.DropOperation,
+        info: NSDraggingInfo
+    ) -> NoteListDrop.Resolution {
+        // Drags from anywhere but this list are not this phase's business; the
+        // composer keeps its own drop area for those.
+        guard let source = info.draggingSource as? NSTableView, source === tableView else {
+            return .reject
+        }
+        return NoteListDrop.resolve(
+            rows: rows,
+            proposedRow: row,
+            operation: operation,
+            mode: mode,
+            activeSection: store.activeSection,
+            isFiltering: !selection.searchText.isEmpty,
+            draggedIDs: Set(draggedNoteIDs)
+        )
+    }
+
     // MARK: NSTableViewDataSource / Delegate
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -848,6 +1039,10 @@ final class NoteListRowView: NSTableRowView {
     /// on the card's white fill. This row never draws that highlight, so its
     /// content must always draw as normal.
     override var interiorBackgroundStyle: NSView.BackgroundStyle { .normal }
+
+    // No `drawDraggingDestinationFeedback(in:)` override: nothing in this list
+    // is ever an on-row drop target, so it has no caller. Drops land in gaps
+    // between rows, which the table draws by moving the rows apart.
 }
 
 /// Catches clicks that land in the scroll view but below the last row — the
