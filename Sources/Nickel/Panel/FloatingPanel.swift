@@ -50,6 +50,12 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
             defer: false
         )
 
+        // Enough for the top bar, one note row, and the composer — a native
+        // window always declares a floor so a resize can't collapse it to
+        // nothing (and a stale saved frame this small can't persist either;
+        // see the clamp in `restoreOrPositionFrame`).
+        minSize = NSSize(width: 300, height: 320)
+
         level = PanelSettings.keepPanelOnTop ? .floating : .normal
         isMovableByWindowBackground = true
         hidesOnDeactivate = false
@@ -125,7 +131,12 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// nothing was saved or the saved frame is no longer on any screen.
     private func restoreOrPositionFrame() {
         if let saved = Self.loadSavedFrame(), let clamped = clampToVisibleScreen(saved) {
-            setFrame(clamped, display: false)
+            // A frame saved before `minSize` existed (or otherwise corrupted
+            // down to a sliver) recovers here instead of restoring broken.
+            var floored = clamped
+            floored.size.width = max(floored.size.width, minSize.width)
+            floored.size.height = max(floored.size.height, minSize.height)
+            setFrame(floored, display: false)
         } else {
             positionNearTopRight()
         }

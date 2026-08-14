@@ -126,7 +126,6 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// rather than row indices because a row can be inserted or removed before
     /// the batch is flushed, which would shift the indices out from under it.
     private let pendingHeightCells = NSHashTable<NoteListCellView>.weakObjects()
-    private var pendingAllRowHeights = false
     private var isHeightFlushScheduled = false
 
     /// Expanding a row and opening/closing an inline edit are motions the user
@@ -452,11 +451,12 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     }
 
     /// The panel was resized: every row rewraps its text, so every height is
-    /// stale.
+    /// stale. Marked stale rather than wiped — the old heights stay readable
+    /// (`heightOfRow`) until the flush overwrites them, so a mid-resize
+    /// retile never flashes through the 45pt placeholder.
     func invalidateAllRowHeights() {
         guard !rows.isEmpty else { return }
-        rowHeights.removeAll()
-        pendingAllRowHeights = true
+        staleHeightRows.formUnion(rows)
         scheduleHeightFlush()
     }
 
@@ -471,14 +471,10 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     private func flushPendingRowHeights() {
         isHeightFlushScheduled = false
         var indexes = measureOutstandingRowHeights()
-        if pendingAllRowHeights, !rows.isEmpty {
-            indexes.insert(integersIn: 0..<rows.count)
-        }
         for cell in pendingHeightCells.allObjects {
             let row = tableView.row(for: cell)
             if rows.indices.contains(row) { indexes.insert(row) }
         }
-        pendingAllRowHeights = false
         pendingHeightCells.removeAllObjects()
 
         let animates = animatesPendingHeightChange
