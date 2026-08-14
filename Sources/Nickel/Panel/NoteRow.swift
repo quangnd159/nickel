@@ -51,6 +51,25 @@ enum NoteRowMetrics {
     }
 }
 
+/// Set while a row's content is being built purely to measure its height
+/// off in the wings (`NoteListTable.measureOutstandingRowHeights`'s stale
+/// branch), never to display it. `NoteRowContent` reads this to swap the
+/// live, focus-claiming `InlineNoteEditorField` for an inert `Text` of
+/// identical geometry — the measuring host is never in a window, so the
+/// live editor's focus claim would always no-op today, but building a real
+/// second editor for every stale measurement of the edited row has no
+/// upside and is one accidental change away from being unsafe.
+private struct IsMeasurementOnlyKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var isMeasurementOnly: Bool {
+        get { self[IsMeasurementOnlyKey.self] }
+        set { self[IsMeasurementOnlyKey.self] = newValue }
+    }
+}
+
 /// A single note card: circle checkbox + note text (or an inline editor),
 /// styled to match the Copper-style panel (white/dark-gray rounded card,
 /// blue selection outline).
@@ -79,6 +98,7 @@ struct NoteRowContent: View {
     /// `NSViewRepresentable`.
     @State private var editFieldFocused: Bool = false
     @Environment(\.controlActiveState) private var controlActiveState
+    @Environment(\.isMeasurementOnly) private var isMeasurementOnly
 
     private var note: Note? { store.notesByID[noteID] }
 
@@ -178,15 +198,39 @@ struct NoteRowContent: View {
         )
     }
 
+    @ViewBuilder
     private var editField: some View {
-        InlineNoteEditorField(
-            text: editingTextBinding,
-            isFocused: $editFieldFocused,
-            onCommit: commitEdit,
-            onCancel: { selection.endEditing() }
-        )
-        .onChange(of: editFieldFocused, commitOnFocusLoss)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        if isMeasurementOnly {
+            measurementEditField
+        } else {
+            InlineNoteEditorField(
+                text: editingTextBinding,
+                isFocused: $editFieldFocused,
+                onCommit: commitEdit,
+                onCancel: { selection.endEditing() }
+            )
+            .onChange(of: editFieldFocused, commitOnFocusLoss)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// A measurement-only stand-in for `InlineNoteEditorField`, used when a
+    /// stale row is measured off in the wings
+    /// (`NoteListTable.measureOutstandingRowHeights`). Styled to the exact
+    /// geometry `InlineNoteEditorField.sizeThatFits` computes from: same
+    /// 14pt font, same 2pt line spacing, and no insets — the live editor's
+    /// `textContainerInset` is `.zero` and its `lineFragmentPadding` is 0,
+    /// so nothing pads this either. `NSTextView` reserves a trailing line
+    /// for a string ending in "\n"; `Text` doesn't, so a trailing newline
+    /// gets a trailing space appended to keep the two in step.
+    private var measurementEditField: some View {
+        var text = selection.editingText
+        if text.hasSuffix("\n") { text += " " }
+        return Text(text)
+            .font(.system(size: 14))
+            .lineSpacing(2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var isExpanded: Bool { selection.expandedIDs.contains(noteID) }
