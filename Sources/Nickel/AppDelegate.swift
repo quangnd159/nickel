@@ -253,11 +253,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         ).keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(.separator())
         editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        // `NSText.copy(_:)` resolves to the plain `copy:` selector, which
+        // `NoteListTableView` also implements — so with the note list (not a
+        // field editor) focused, this item acts on the note selection.
         editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
         // No key equivalent: ⌫ already deletes via the panel/field's own key
         // handling, so this exists for discoverability and menu-driven use
-        // (e.g. VoiceOver), not as the primary way to delete.
+        // (e.g. VoiceOver), not as the primary way to delete. Like Copy
+        // above, `NSText.delete(_:)` resolves to `delete:`, which
+        // `NoteListTableView` also implements, so this acts on the note
+        // selection when the list has focus.
         editMenu.addItem(NSMenuItem(title: "Delete", action: #selector(NSText.delete(_:)), keyEquivalent: ""))
         editMenu.addItem(.separator())
         editMenu.addItem(

@@ -616,6 +616,28 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         tableView.selectRowIndexes(indexes, byExtendingSelection: false)
     }
 
+    /// Whether the Edit menu's Copy/Delete items should be enabled — i.e.
+    /// whether there's a note selection for them to act on.
+    var hasSelectedNotes: Bool {
+        !(selection?.selectedIDs.isEmpty ?? true)
+    }
+
+    /// Edit ▸ Copy, routed here so it acts on the note selection when the
+    /// note list (not a field editor) has focus.
+    func copySelection() {
+        actions?.copy()
+    }
+
+    /// Edit ▸ Delete, routed here so it acts on the note selection when the
+    /// note list (not a field editor) has focus.
+    func deleteSelection() {
+        actions?.delete()
+    }
+
+    /// Read by `NoteListMenuActionsTests` to drive the table view's
+    /// responder-chain overrides directly.
+    var tableViewForTesting: NoteListTableView { tableView }
+
     // MARK: Clicks
 
     /// Click on empty space below the rows: give up text focus (which commits
@@ -1023,6 +1045,19 @@ final class NoteListTableView: NSTableView {
         coordinator?.selectAllNoteRows()
     }
 
+    /// Edit ▸ Copy, reached via the responder chain when the note list (not
+    /// a field editor) has focus. `NSText.copy(_:)`, used by the menu item,
+    /// resolves to the same `copy:` selector.
+    @objc func copy(_ sender: Any?) {
+        coordinator?.copySelection()
+    }
+
+    /// Edit ▸ Delete, reached via the responder chain when the note list
+    /// (not a field editor) has focus.
+    @objc func delete(_ sender: Any?) {
+        coordinator?.deleteSelection()
+    }
+
     /// The arrows are the table's own navigation (it moves the selection and
     /// keeps the lead row visible); every other key the panel has a shortcut
     /// for goes up the responder chain to `FloatingPanel.keyDown`, which is
@@ -1035,6 +1070,15 @@ final class NoteListTableView: NSTableView {
             return
         }
         super.keyDown(with: event)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        switch item.action {
+        case #selector(copy(_:)), #selector(delete(_:)):
+            return coordinator?.hasSelectedNotes == true
+        default:
+            return responds(to: item.action)
+        }
     }
 }
 
