@@ -42,6 +42,11 @@ struct SectionSwitcher: View {
 
     @State private var query = ""
     @State private var highlightedIndex = 0
+
+    /// The selection count the move-mode header displays, captured once on
+    /// appear so the title stays stable for the palette's whole lifetime —
+    /// see `moveHeaderTitle`.
+    @State private var frozenMoveCount: Int?
     @Environment(\.controlActiveState) private var controlActiveState
 
     /// Whether the highlighted row draws with the emphasized (accent-filled,
@@ -82,6 +87,7 @@ struct SectionSwitcher: View {
                     .padding(.horizontal, 12)
                     .padding(.top, 10)
                     .padding(.bottom, 2)
+                    .onAppear { frozenMoveCount = selection.selectedIDs.count }
             }
 
             SectionSwitcherField(
@@ -281,9 +287,12 @@ struct SectionSwitcher: View {
     }
 
     /// "Move 1 Note to Section" / "Move N Notes to Section", shown above the
-    /// search field only in move mode (see `card`).
+    /// search field only in move mode (see `card`). Reads the frozen count:
+    /// committing clears the selection before the palette finishes its
+    /// dismiss animation, and a live read would flash "Move 0 Notes" as it
+    /// fades out.
     private var moveHeaderTitle: String {
-        let count = selection.selectedIDs.count
+        let count = frozenMoveCount ?? selection.selectedIDs.count
         return count == 1 ? "Move 1 Note to Section" : "Move \(count) Notes to Section"
     }
 
