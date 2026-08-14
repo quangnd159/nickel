@@ -1210,8 +1210,15 @@ extension Animation {
 /// animation's start point picks up a live System Settings change on the
 /// very next animation, with no notification observer needed.
 enum Motion {
+    /// Forced-on by the UI probe (`UIProbe`): a headless CI runner never
+    /// ticks AppKit's animated scrolls, so an animated reveal's viewport
+    /// change would simply never land there. With motion reduced the probe's
+    /// geometry is deterministic everywhere. The probe's animation-specific
+    /// check (edit-open stationarity) clears this for its own scope.
+    static var probeOverrideReduced: Bool?
+
     static var isReduced: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        probeOverrideReduced ?? NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
 }
 

@@ -46,6 +46,16 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
     private static let veryLongNoteText = Array(repeating: longNoteText, count: 3).joined(separator: "\n\n")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Unbuffered, so the probe's own prints interleave truthfully with
+        // NSLog-based debug output when both are captured to one file.
+        setbuf(stdout, nil)
+        // Deterministic geometry: a headless CI runner never ticks AppKit's
+        // animated scrolls, so an animated reveal would leave the viewport
+        // stranded mid-flight there. Reduced motion makes every reveal land
+        // instantly; the one check that needs a real animation (edit-open
+        // stationarity) clears this override for its own scope.
+        Motion.probeOverrideReduced = true
+
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("NickelUIProbe-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -480,6 +490,10 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         // position in table coordinates must not drift by a point across the
         // animation's run. (Table coordinates are content-relative, so the
         // reveal scroll doesn't pollute the samples.)
+        // Animations back on for the stationarity check below: it samples a
+        // real animated open. Its assertions are in content coordinates, so
+        // they hold whether or not the runner actually ticks the animation.
+        Motion.probeOverrideReduced = false
         selection.selectSingle(bottomNote.id)
         settle()
         // The selection ring lives on the cell's layer (not in the SwiftUI
@@ -518,6 +532,7 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
         }
         selection.endEditing()
         settle()
+        Motion.probeOverrideReduced = true
 
         checkTallEditReveal(table: table, store: store, selection: selection, clipView: clipView)
     }

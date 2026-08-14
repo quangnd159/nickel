@@ -510,6 +510,14 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// that prompted it reached the table, so this is the moment the row's
     /// height is known.
     func rowHeight(_ height: CGFloat, didSettleIn cell: NoteListCellView) {
+        // A cell that hasn't re-hosted its content at its current width yet
+        // (the pin is deferred a turn — see `NoteListCellView.setFrameSize`)
+        // reports the height of a layout it's about to stop having. Writing
+        // that into the cache briefly shrinks the table, and `NSClipView`
+        // clamps the scroll against the shrunken frame — permanently. The
+        // settled report that follows the re-host corrects the cache; the
+        // unsettled one must never reach it.
+        guard cell.isContentSettled else { return }
         let row = tableView.row(for: cell)
         guard rows.indices.contains(row), height > 0 else { return }
         guard rowHeights[rows[row]] != height else { return }
@@ -576,19 +584,41 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
         // documented way to suppress that), so the reveal below can read the
         // new row geometry and animate the scroll alongside the growth
         // instead of chasing it afterwards.
-        NSAnimationContext.runAnimationGroup({ context in
-            context.duration = (animates && !Motion.isReduced) ? 0.24 : 0
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            if !indexes.isEmpty {
-                tableView.noteHeightOfRows(withIndexesChanged: indexes)
-            }
-            applyPendingReveal()
-        }, completionHandler: { [weak self] in
-            // Collapsing rows kept rendering their full content while the
-            // card animated shut (`SelectionModel.collapseHold`); the card is
-            // closed now, so the swap to the preview happens out of sight.
-            self?.selection.releaseCollapseHold()
-        })
+        if animates && !Motion.isReduced {
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0.24
+                context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                if !indexes.isEmpty {
+                    tableView.noteHeightOfRows(withIndexesChanged: indexes)
+                }
+                applyPendingReveal(animated: true)
+            }, completionHandler: { [weak self] in
+                // Collapsing rows kept rendering their full content while the
+                // card animated shut (`SelectionModel.collapseHold`); the card
+                // is closed now, so the swap to the preview happens out of
+                // sight.
+                self?.selection.releaseCollapseHold()
+            })
+        } else {
+            // Instant path (typing, store updates, Reduce Motion). The
+            // zero-duration group suppresses the visible animation, but
+            // `noteHeightOfRows` still spawns its row animation, whose first
+            // tick restores the table's old frame for one frame — and
+            // `NSClipView` clamps a scroll to the document's current frame,
+            // permanently (observed; pinned by the probe's reduced-motion
+            // reveal checks). The reveal therefore runs in the group's
+            // completion, the documented point after that machinery has
+            // finished; at zero duration nothing is visible in between.
+            NSAnimationContext.runAnimationGroup({ context in
+                context.duration = 0
+                if !indexes.isEmpty {
+                    tableView.noteHeightOfRows(withIndexesChanged: indexes)
+                }
+                applyPendingReveal(animated: false)
+            }, completionHandler: { [weak self] in
+                self?.selection.releaseCollapseHold()
+            })
+        }
     }
 
     /// Notes a row that should be brought into view once the height change
@@ -625,7 +655,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
     /// `rect(ofRow:)` already reports the new geometry while the visible
     /// change is still animating. Both motions therefore belong to one
     /// transaction and settle together.
-    private func applyPendingReveal() {
+    private func applyPendingReveal(animated: Bool) {
         let reveal = pendingReveal
         pendingReveal = nil
 
@@ -655,9 +685,14 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
         guard abs(targetY - visible.minY) > 0.5 else { return }
         let origin = NSPoint(x: visible.minX, y: targetY)
-        if NSAnimationContext.current.duration > 0 {
+        if animated {
             clipView.animator().setBoundsOrigin(origin)
         } else {
+            // The table's frame catches up to the retile on a deferred pass,
+            // and `NSClipView` clamps a scroll to the document's *current*
+            // frame — force the resize first so an instant scroll into
+            // just-grown territory isn't clamped short.
+            tableView.tile()
             clipView.setBoundsOrigin(origin)
         }
         scrollView.reflectScrolledClipView(clipView)
@@ -1076,6 +1111,7 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 /// own shortcut keys, which are passed up the responder chain to
 /// `FloatingPanel.keyDown` exactly as they were before the table existed.
 final class NoteListTableView: NSTableView {
+
     weak var coordinator: NoteListCoordinator?
     var mode: NoteListMode = .notes
 
@@ -1248,6 +1284,7 @@ final class NoteListClipView: NSClipView {
     override func mouseDown(with event: NSEvent) {
         onBackgroundClick?()
     }
+
 }
 
 // MARK: - Cell
@@ -1303,6 +1340,13 @@ final class NoteListCellView: NSTableCellView {
 
     /// Whether this cell's content currently takes clicks. Read by `UIProbe`.
     var isContentInteractive: Bool { host.isInteractive }
+
+    /// Whether the hosted content has been re-hosted at this cell's current
+    /// width — until then, any height it reports belongs to a stale layout
+    /// (see `NoteListCoordinator.rowHeight(_:didSettleIn:)`).
+    var isContentSettled: Bool {
+        !isContentApplyScheduled && contentWidth > 0 && contentWidth == bounds.width
+    }
 
     /// The height this cell's content wants at its current width. Read by
     /// `UIProbe`.
