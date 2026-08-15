@@ -1387,6 +1387,10 @@ final class NoteListCellView: NSTableCellView {
     /// happens when the row or its position actually changed.
     func configure(content: some View, row: NoteListRow, interactive: Bool) {
         host.isInteractive = interactive
+        // Only a note is a card, so only a note's cell gets the card's rounded
+        // clip. A header's label starts at the cell's left edge, and the corner
+        // curve would shave its first letter.
+        layer?.cornerRadius = row.noteID == nil ? 0 : NoteRowMetrics.cornerRadius
         guard configuredRow != row else { return }
         configuredRow = row
         baseContent = AnyView(
