@@ -456,15 +456,10 @@ struct PanelView: View {
     }
 
     /// Click on the panel's own background (outside the list, composer and
-    /// top bar): resigns first responder — which commits any in-progress
-    /// header rename, Finder-style, via its `textDidEndEditing` path — then
-    /// commits any in-progress note edit and clears the selection. The same
-    /// three steps run for a click below the last row, in
-    /// `NoteListCoordinator.handleBackgroundClick`.
+    /// top bar). Same handling as a click below the last row or on a section
+    /// header — see `PanelActions.clickedNothing`.
     private func handleBackgroundClick() {
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        actions.commitActiveEditIfAny()
-        selection.clear()
+        actions.clickedNothing()
     }
 
     /// Whether there's at least one done note in the current scope (the

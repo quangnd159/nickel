@@ -772,22 +772,26 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
 
     // MARK: Clicks
 
-    /// Click on empty space below the rows: give up text focus (which commits
-    /// an in-progress header rename, Finder-style), commit any in-progress
-    /// note edit, and clear the selection.
+    /// Click on empty space below the rows.
     func handleBackgroundClick() {
-        NSApp.keyWindow?.makeFirstResponder(nil)
-        actions?.commitActiveEditIfAny()
-        selection?.clear()
+        actions?.clickedNothing()
     }
 
     /// A single click landing on `row`, before the table applies its own
     /// selection change. Returns `true` if the click was consumed (a checkbox
     /// hit, which stays selection-inert — a pure work-tracking control, the
-    /// way Copper/Reminders/Things treat it).
+    /// way Copper/Reminders/Things treat it; or a click on a header, which is
+    /// a click on nothing).
     func handleClick(onRow row: Int, at pointInRow: NSPoint, clickCount: Int) -> Bool {
         guard rows.indices.contains(row) else { return false }
-        guard let id = rows[row].noteID else { return false }
+        guard let id = rows[row].noteID else {
+            // A header row, reached through the strip of row spacing above it
+            // that no cell covers. Nothing there is selectable, so the click
+            // means the same as one below the last note — otherwise it's a
+            // dead sliver in the middle of a band that deselects.
+            actions.clickedNothing()
+            return true
+        }
 
         if mode == .notes, pointInRow.x < NoteRowMetrics.checkboxColumnWidth {
             // Only the first click of a double-click toggles: the second
@@ -1085,11 +1089,11 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
                     .environmentObject(actions)
             }
         case .sectionHeader(let name):
-            SectionHeader(name: name)
-                // The gap above a section header is wider than the gap between
-                // notes, exactly as the old list's `.padding(.top, 12)` on top
-                // of the `VStack`'s spacing made it.
-                .padding(.top, 12)
+            // The gap above a section header is wider than the gap between
+            // notes, exactly as the old list's `.padding(.top, 12)` on top of
+            // the `VStack`'s spacing made it. It's passed in rather than
+            // applied here so it's inside the header's own click area.
+            SectionHeader(name: name, topPadding: 12)
                 .environmentObject(store)
                 .environmentObject(selection)
                 .environmentObject(actions)

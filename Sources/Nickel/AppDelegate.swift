@@ -274,6 +274,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
         editMenu.addItem(
             NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
         )
+        // `NSTableView` already implements `deselectAll:`, so with the note
+        // list focused this clears the selection through the same path the
+        // table's own clicks use. It's the way out when the list is full and
+        // there's no empty space left to click.
+        editMenu.addItem(
+            withTitle: "Deselect All",
+            action: #selector(NSTableView.deselectAll(_:)),
+            keyEquivalent: "a"
+        ).keyEquivalentModifierMask = [.command, .shift]
         editMenu.addItem(.separator())
         editMenu.addItem(windowShortcutMenuItem(for: .findFocus, action: #selector(focusSearch)))
         editMenu.addItem(.separator())

@@ -240,6 +240,32 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
                 "a section header row should measure shorter than a note row "
                     + "(header \(headerHeight), note \(collapsedShortHeight))"
             )
+
+            // (i) Renaming happens in place. The rename box is taller than the
+            // label it replaces, so the header reserves that height in both
+            // states — otherwise opening a rename grows the row and shoves
+            // every note below it down the list.
+            //
+            // Measured on the cell's content, not on `rect(ofRow:)`: the row
+            // height is a cache that only catches up a turn later, so it reads
+            // as unchanged here even when the content underneath has grown.
+            let headerCell = table.view(atColumn: 0, row: headerRow, makeIfNecessary: true) as? NoteListCellView
+            let labelContent = headerCell?.contentIdealHeight ?? 0
+            selection.beginRenamingSection("Probe Section")
+            settle()
+            let renamingContent = headerCell?.contentIdealHeight ?? 0
+            check(
+                labelContent > 0 && renamingContent == labelContent,
+                "opening a rename should not change the header's content height "
+                    + "(label \(labelContent), renaming \(renamingContent))"
+            )
+            selection.endRenamingSection()
+            settle()
+            check(
+                headerCell?.contentIdealHeight == labelContent,
+                "ending a rename should leave the header at its original height "
+                    + "(label \(labelContent), now \(headerCell?.contentIdealHeight ?? 0))"
+            )
         } else {
             fail("no section header row after creating a section")
         }

@@ -18,11 +18,18 @@ struct HeaderRenameField: NSViewRepresentable {
     func makeNSView(context: Context) -> NSTextField {
         let field = NSTextField()
         field.delegate = context.coordinator
+        // No bezel and no focus ring of its own: the caller draws Finder's
+        // rename look around it — a white rounded box with a thin accent
+        // border. A bezelled field brings the aqua glow ring with it, which
+        // is a heavy, animated thing to drop into a list of soft cards, and
+        // it isn't what Finder shows when you rename an item either.
         field.isBordered = false
         field.drawsBackground = false
         field.focusRingType = .none
         field.font = .systemFont(ofSize: 11, weight: .semibold)
-        field.textColor = .secondaryLabelColor
+        // Primary, not secondary: the header label is dimmed because it's a
+        // label, but text being edited is the focus of the panel.
+        field.textColor = .labelColor
         field.stringValue = text
         field.lineBreakMode = .byTruncatingTail
 

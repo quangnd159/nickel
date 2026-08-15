@@ -139,6 +139,17 @@ final class PanelActions: ObservableObject {
         selection.endEditing()
     }
 
+    /// A click that landed on something that isn't a note: the panel
+    /// background, the space below the last row, or a section header. Gives
+    /// up text focus — which commits an in-progress header rename,
+    /// Finder-style, through its `textDidEndEditing` path — commits any
+    /// in-progress note edit, and clears the selection.
+    func clickedNothing() {
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        commitActiveEditIfAny()
+        selection.clear()
+    }
+
     func merge() {
         guard !isShowingLogbook, selection.selectedIDs.count >= 2 else { return }
         let mergedID = selectedNotes.min(by: { $0.createdAt < $1.createdAt })?.id
