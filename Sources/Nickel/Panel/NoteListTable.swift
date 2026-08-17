@@ -1184,16 +1184,24 @@ final class NoteListTableView: NSTableView {
         coordinator?.handleDoubleClick(onRow: row, at: pointInRow(event, row: row))
     }
 
-    /// `super` sets `clickedRow`/`clickedColumn` and draws the contextual
-    /// menu's row highlight; the coordinator adjusts the selection first and
-    /// hands back the menu built for it.
+    /// The coordinator adjusts the selection for the clicked row and hands
+    /// back the menu built for it.
     override func menu(for event: NSEvent) -> NSMenu? {
         let point = convert(event.locationInWindow, from: nil)
         let row = self.row(at: point)
         guard row >= 0 else { return nil }
         menu = coordinator?.handleRightClick(onRow: row)
-        return super.menu(for: event)
+        return menu
     }
+
+    /// AppKit's own contextual-menu feedback is a square-cornered box around
+    /// the full row rect, which shows up outside the card's rounded edge and
+    /// its selection ring. Right-clicking already selects the row, so the ring
+    /// is the whole feedback; not calling `super` drops the extra box. The
+    /// only thing lost is `clickedRow`, and the row is read from the event
+    /// above instead.
+    override func willOpenMenu(_ menu: NSMenu, with event: NSEvent) {}
+    override func didCloseMenu(_ menu: NSMenu, with event: NSEvent?) {}
 
     /// ⌘A. `NSTableView`'s own `selectAll(_:)` would include the section and
     /// day header rows.

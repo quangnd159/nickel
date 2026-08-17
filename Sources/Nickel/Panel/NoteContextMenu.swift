@@ -1,7 +1,7 @@
 import AppKit
 
 /// The note row's contextual menu, built as an `NSMenu` so the table keeps its
-/// native right-click behavior (`clickedRow`, the row highlight, and a
+/// native right-click behavior (the clicked row picked from the event, and a
 /// selection that's adjusted before the menu opens).
 ///
 /// A SwiftUI `.contextMenu` on the row's content isn't an option any more: the
