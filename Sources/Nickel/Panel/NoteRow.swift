@@ -293,10 +293,22 @@ struct NoteRowContent: View {
         UTType(attachment.contentType)?.conforms(to: .image) ?? false
     }
 
+    /// The thumbnail keeps its own shape inside a band of a **fixed** 64pt
+    /// height, never a `maxHeight`. A vertically flexible thumbnail is a
+    /// stretchy member of the enclosing `VStack`, and the stack answers a
+    /// height query by handing it the slack it takes from the note's text —
+    /// which silently clamps the 3-line preview to 2 lines (verified by
+    /// `NICKEL_UI_PROBE=1`). Fitting inside the band also keeps a very wide
+    /// image inside the card: it shrinks below 64pt tall rather than running
+    /// past the card's right edge.
     private func imageThumbnail(_ attachment: Attachment, in note: Note) -> some View {
-        AttachmentThumbnailView(fileURL: store.url(for: attachment, in: note), contentType: attachment.contentType, size: 64)
-            .frame(maxHeight: 64)
-            .fixedSize(horizontal: true, vertical: false)
+        HStack(spacing: 0) {
+            AttachmentThumbnailView(
+                fileURL: store.url(for: attachment, in: note),
+                contentType: attachment.contentType,
+                size: 256,
+                contentMode: .fit
+            )
             .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -304,6 +316,10 @@ struct NoteRowContent: View {
             )
             .accessibilityLabel(attachment.filename)
             .reportingAttachmentFrame(id: attachment.id, in: Self.attachmentsSpace)
+
+            Spacer(minLength: 0)
+        }
+        .frame(height: 64)
     }
 
     private func attachmentCard(_ attachment: Attachment, in note: Note) -> some View {

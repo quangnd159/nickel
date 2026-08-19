@@ -19,9 +19,15 @@ import QuickLookThumbnailing
 struct AttachmentThumbnailView: View {
     let fileURL: URL
     let contentType: String
-    /// The thumbnail's point size (square). Callers size the enclosing frame
-    /// to match.
+    /// The bounding box, in points, the thumbnail is generated for. Callers
+    /// showing it in a fixed square frame pass that square's size; the note
+    /// card's big image thumbnail asks for more than it usually draws, since
+    /// a wide image comes back short and would otherwise be scaled up.
     var size: CGFloat
+    /// How the generated thumbnail fills its frame. `.fill` crops it to a
+    /// frame the caller has already sized (every square thumbnail); `.fit`
+    /// lets it keep its own shape inside the space offered.
+    var contentMode: ContentMode = .fill
 
     @State private var image: NSImage?
 
@@ -32,7 +38,7 @@ struct AttachmentThumbnailView: View {
             if let image {
                 Image(nsImage: image)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
+                    .aspectRatio(contentMode: contentMode)
             } else {
                 Image(nsImage: NSWorkspace.shared.icon(forFile: fileURL.path))
                     .resizable()
