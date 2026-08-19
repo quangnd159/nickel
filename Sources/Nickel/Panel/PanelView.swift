@@ -195,6 +195,18 @@ struct PanelView: View {
                     .transition(sectionSwitchTransition)
             }
         }
+        // Every animation the panel's own state drives is declared here, not
+        // carried to the mutation by `withAnimation`. Most of these changes
+        // start in AppKit — ⌘K/⌘//⌃⌘M in `FloatingPanel.performKeyEquivalent`,
+        // Esc in its `sendEvent`, the View menu's items — and an animated
+        // transaction opened from outside SwiftUI's own update never gets
+        // flushed: the state flipped, the panel kept drawing the old frame,
+        // and the palette only appeared when some later change (a click into
+        // another app, ⌘F) forced an update. Declaring the animation against
+        // the value leaves every mutation a plain one, which always lands.
+        .animation(.panelOverlay, value: selection.presentedOverlay)
+        .animation(.noteRowSpring, value: selection.isShowingLogbook)
+        .animation(.spring(response: 0.3, dampingFraction: 0.8), value: attachmentToast)
         .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
         .onReceive(NotificationCenter.default.publisher(for: .nickelComposerPaste)) { _ in
             stagePasteboardAttachments()
@@ -1036,14 +1048,10 @@ struct PanelView: View {
     private func showAttachmentToast(message: String) {
         attachmentToastDismissTask?.cancel()
 
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            attachmentToast = message
-        }
+        attachmentToast = message
 
         let dismiss = DispatchWorkItem {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                attachmentToast = nil
-            }
+            attachmentToast = nil
         }
         attachmentToastDismissTask = dismiss
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8, execute: dismiss)

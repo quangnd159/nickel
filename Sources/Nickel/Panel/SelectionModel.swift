@@ -338,9 +338,7 @@ final class SelectionModel: ObservableObject {
     /// `FloatingPanel` (⌘/) and `AppDelegate` (the View menu's Keyboard
     /// Shortcuts item, after `showPanelIfHidden()`).
     func toggleOverlay(_ overlay: PanelOverlay) {
-        withAnimation(.panelOverlay) {
-            presentedOverlay = (presentedOverlay == overlay) ? nil : overlay
-        }
+        presentedOverlay = (presentedOverlay == overlay) ? nil : overlay
     }
 
     /// ⌘K's toggle: closes the palette if it's already open (in either
@@ -351,12 +349,10 @@ final class SelectionModel: ObservableObject {
     /// different overlay" instead of closing the one that's open. Called
     /// directly by `FloatingPanel` and `AppDelegate`, same as `toggleOverlay`.
     func toggleSectionSwitcher() {
-        withAnimation(.panelOverlay) {
-            if case .sectionSwitcher = presentedOverlay {
-                presentedOverlay = nil
-            } else {
-                presentedOverlay = .sectionSwitcher(move: false)
-            }
+        if case .sectionSwitcher = presentedOverlay {
+            presentedOverlay = nil
+        } else {
+            presentedOverlay = .sectionSwitcher(move: false)
         }
     }
 
@@ -369,12 +365,10 @@ final class SelectionModel: ObservableObject {
     /// directly by `FloatingPanel` and `AppDelegate`, same as `toggleOverlay`.
     func toggleMoveToSection() {
         guard !isShowingLogbook, !selectedIDs.isEmpty else { return }
-        withAnimation(.panelOverlay) {
-            if case .sectionSwitcher(let move) = presentedOverlay, move {
-                presentedOverlay = nil
-            } else {
-                presentedOverlay = .sectionSwitcher(move: true)
-            }
+        if case .sectionSwitcher(let move) = presentedOverlay, move {
+            presentedOverlay = nil
+        } else {
+            presentedOverlay = .sectionSwitcher(move: true)
         }
     }
 
@@ -417,9 +411,7 @@ final class SelectionModel: ObservableObject {
         clear()
         endEditing()
         permanentDeleteConfirmation = nil
-        withAnimation(.noteRowSpring) {
-            isShowingLogbook = isShowing
-        }
+        isShowingLogbook = isShowing
     }
 
     // MARK: - Select all

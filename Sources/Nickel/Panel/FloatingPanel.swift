@@ -557,11 +557,7 @@ final class FloatingPanel: NSPanel, NSWindowDelegate {
     /// activating panel — see the init comment — so AppKit handles it.)
     override func sendEvent(_ event: NSEvent) {
         if event.type == .keyDown, event.keyCode == 53, selectionModel.presentedOverlay != nil {
-            // Same animation the overlay opened with (`PanelView.toggleOverlay`),
-            // so Esc and ⌘K close it identically.
-            withAnimation(.panelOverlay) {
-                selectionModel.presentedOverlay = nil
-            }
+            selectionModel.presentedOverlay = nil
             return
         }
         super.sendEvent(event)

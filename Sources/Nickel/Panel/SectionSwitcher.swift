@@ -317,12 +317,11 @@ struct SectionSwitcher: View {
         }
     }
 
-    /// Closes the palette in the same animation `PanelView.toggleOverlay`
-    /// opens it with, so Esc, a click on the dim, and ⌘K all look identical.
+    /// Closing is a plain state change, like every other way the palette is
+    /// dismissed; `PanelView` owns the animation (see its
+    /// `.animation(.panelOverlay, value:)`).
     private func dismiss() {
-        withAnimation(.panelOverlay) {
-            selection.presentedOverlay = nil
-        }
+        selection.presentedOverlay = nil
     }
 }
 
