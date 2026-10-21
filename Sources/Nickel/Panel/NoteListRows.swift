@@ -38,12 +38,17 @@ enum NoteListRows {
 
         // Show All: ungrouped notes first, then every section's header —
         // including empty ones, which is where Show All is the only place they
-        // can be found, reordered or deleted — followed by its notes.
+        // can be found, reordered or deleted — followed by its notes. A search
+        // lists only the sections it matched in: a header with nothing under
+        // it is just noise between the results.
         let grouped = selection.filteredNotesBySection
+        let isFiltering = !selection.searchText.isEmpty
         var rows: [NoteListRow] = (grouped[String?.none] ?? []).map { .note($0.id) }
         for sectionName in store.sections {
+            let notes = grouped[sectionName] ?? []
+            if isFiltering && notes.isEmpty { continue }
             rows.append(.sectionHeader(sectionName))
-            rows += (grouped[sectionName] ?? []).map { .note($0.id) }
+            rows += notes.map { .note($0.id) }
         }
         return rows
     }

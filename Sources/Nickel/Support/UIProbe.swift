@@ -274,6 +274,8 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
 
         checkDelegateGuards(table: table)
 
+        checkSearchFilter(table: table, store: store, selection: selection)
+
         finish()
     }
 
@@ -732,6 +734,53 @@ final class UIProbeDelegate: NSObject, NSApplicationDelegate {
             "closing an edit must keep the collapsed row on screen "
                 + "(row \(closedRow), viewport \(closedVisible))"
         )
+    }
+
+    /// Search results follow each keystroke at once. Animated, every
+    /// keystroke interrupted the previous one's fades and slides, and cards
+    /// were left stranded where an older query had put them. A search also
+    /// leaves out the sections it found nothing in.
+    private func checkSearchFilter(table: NoteListTableView, store: NoteStore, selection: SelectionModel) {
+        selection.endEditing()
+        store.setActiveSection(nil)
+        store.add(text: "Resume HANDOFF.md: start Stage 2", sourceApp: nil)
+        store.createSection(named: "Search Section")
+        store.add(text: "Make the hand-off explicit", sourceApp: nil)
+        store.setActiveSection(nil)
+        settle()
+
+        // Real motion: this is about animations, so they have to run.
+        Motion.probeOverrideReduced = false
+        defer { Motion.probeOverrideReduced = true }
+
+        var animating: [String] = []
+        for query in ["h", "ha", "han", "hand", "han", "", "hand"] {
+            selection.searchText = query
+            // The table updates on SwiftUI's next pass, not synchronously.
+            settle(seconds: 0.02)
+            for case let rowView as NSTableRowView in table.subviews {
+                let keys = rowView.layer?.animationKeys() ?? []
+                if !keys.isEmpty || rowView.alphaValue < 0.99 {
+                    animating.append("\"\(query)\": \(keys) alpha \(rowView.alphaValue)")
+                }
+            }
+        }
+        settle()
+        print("— search \"hand\" —")
+        dumpRows(table)
+        for entry in animating.prefix(6) { print("    \(entry)") }
+        check(animating.isEmpty, "rows should not animate while the query changes (\(animating.count) row views were)")
+
+        let rows = table.coordinator?.rows ?? []
+        let emptyHeaders = rows.indices.filter { index in
+            guard case .sectionHeader = rows[index] else { return false }
+            return index + 1 == rows.count || rows[index + 1].noteID == nil
+        }
+        check(emptyHeaders.isEmpty, "a search should list no section without a match (\(emptyHeaders.count) empty headers)")
+        checkCachedHeightsMatchCells(table: table)
+
+        selection.searchText = ""
+        settle()
     }
 
     /// Checks every row that has a cell: the height the table is using must be

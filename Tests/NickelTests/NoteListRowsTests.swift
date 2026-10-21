@@ -98,6 +98,24 @@ final class NoteListRowsTests: XCTestCase {
         XCTAssertEqual(rows.count, 2)
     }
 
+    /// A search lists only the sections it matched in; the empty headers come
+    /// back with the full list.
+    func testSearchDropsSectionsWithNoMatches() {
+        store.createSection(named: "Work")
+        store.add(text: "apple at work", sourceApp: nil)
+        let workID = store.notes[0].id
+        store.createSection(named: "Home")
+        store.add(text: "banana at home", sourceApp: nil)
+        store.createSection(named: "Empty")
+        store.setActiveSection(nil)
+
+        selection.searchText = "apple"
+        XCTAssertEqual(rows, [.sectionHeader("Work"), .note(workID)])
+
+        selection.searchText = ""
+        XCTAssertTrue(rows.contains(.sectionHeader("Empty")))
+    }
+
     // MARK: - Logbook rows
 
     func testLogbookRowsGroupByDayAndEndWithTheFooter() {

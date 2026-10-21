@@ -286,6 +286,12 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
             claimFocusIfNothingHasIt()
             return
         }
+        // Results follow the query instantly, the way every native search
+        // list does. A fade and slide per keystroke means a fast typist
+        // interrupts dozens of row animations mid-flight, and the cards
+        // visibly strand at the positions of a query already gone.
+        let rowAnimation: NSTableView.AnimationOptions =
+            stamp.searchText == lastUpdateStamp?.searchText ? [.effectFade] : []
         lastUpdateStamp = stamp
         #if DEBUG
         heavyUpdateRunCount += 1
@@ -298,10 +304,10 @@ final class NoteListCoordinator: NSObject, NSTableViewDataSource, NSTableViewDel
             rows = newRows
             tableView.beginUpdates()
             if !steps.removals.isEmpty {
-                tableView.removeRows(at: steps.removals, withAnimation: [.effectFade])
+                tableView.removeRows(at: steps.removals, withAnimation: rowAnimation)
             }
             if !steps.insertions.isEmpty {
-                tableView.insertRows(at: steps.insertions, withAnimation: [.effectFade])
+                tableView.insertRows(at: steps.insertions, withAnimation: rowAnimation)
             }
             tableView.endUpdates()
         }
